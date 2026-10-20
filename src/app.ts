@@ -1,0 +1,48 @@
+import express, { NextFunction, Request, Response } from 'express';
+import cors from 'cors';
+import path from 'path';
+import session from 'express-session';
+import { config } from './config';
+import { positionsRouter } from './routes/positions';
+import { orgchartRouter } from './routes/orgchart';
+import { wikidataRouter } from './routes/wikidata';
+import { wikipediaRouter } from './routes/wikipedia';
+import { infoboxRouter } from './routes/infobox';
+import { authRouter } from './routes/auth';
+import { countriesRouter } from './routes/countries';
+
+export function createApp() {
+  const app = express();
+
+  app.use(cors({ origin: true, credentials: true }));
+  app.use(express.json());
+  app.use(
+    session({
+      secret: config.sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { httpOnly: true, sameSite: 'lax' },
+    }),
+  );
+
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.use('/api/positions', positionsRouter);
+  app.use('/api/orgchart', orgchartRouter);
+  app.use('/api/wikidata', wikidataRouter);
+  app.use('/api/wikipedia', wikipediaRouter);
+  app.use('/api/infobox', infoboxRouter);
+  app.use('/api/auth', authRouter);
+  app.use('/api/countries', countriesRouter);
+
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({ error: `No route for ${req.method} ${req.path}` });
+  });
+
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  });
+
+  return app;
+}
