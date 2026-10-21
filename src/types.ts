@@ -51,3 +51,29 @@ export interface OrgChartEntry {
   // entry that is itself someone else's deputy (those never appear at the top level).
   deputies: OrgChartEntry[];
 }
+
+export interface Department {
+  qid: string;
+  label: string;
+  wikipediaTitle: string | null;
+  // Wikidata P571 / P576 on the department itself; a department is only listed on dates it existed.
+  inception: string | null;
+  dissolved: string | null;
+  // The office(s) that run the department — P2389 on the office or P2388 on the department.
+  // Usually exactly one; empty when Wikidata links no head office (itself a data gap).
+  heads: OrgChartEntry[];
+  // Other offices within the department (P361 "part of"), held by someone on the date.
+  offices: OrgChartEntry[];
+  // Offices within the department that existed but had no recorded holder on the date.
+  vacant: OrgChartEntry[];
+}
+
+export interface DepartmentsView {
+  date: string;
+  country: string;
+  // Head of state / head of government — shown above the departments, not inside one.
+  leaders: OrgChartEntry[];
+  departments: Department[];
+  // Cabinet-level offices Wikidata doesn't connect to any department (no P2389/P2388 link).
+  unassigned: OrgChartEntry[];
+}

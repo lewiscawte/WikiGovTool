@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabinet Explorer: Departments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libertinus+Serif:ital,wght@0,400;0,600;1,400&family=Public+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="toolbar">
+    <span class="brand">Cabinet Explorer</span>
+    <nav class="views" aria-label="View">
+      <a href="departments.html" data-view-link="departments.html" aria-current="page">Departments</a>
+      <a href="index.html" data-view-link="index.html">Offices</a>
+    </nav>
+    <label class="toggle" title="Show Wikidata QIDs next to offices and officeholders">
+      <input type="checkbox" id="debugToggle"> Show QIDs
+    </label>
+    <button type="button" class="btn" id="loginToggle">Log in with Wikimedia</button>
+  </div>
+
+  <h1 class="headline">
+    Government of
+    <select class="headline-control" id="countrySelect" aria-label="Country"></select>
+    on
+    <input type="date" class="headline-control" id="dateInput" aria-label="Date">
+  </h1>
+  <p class="cabinet" id="yearLabel"></p>
+
+  <div class="timeline">
+    <span class="timeline-end">1900</span>
+    <input type="range" step="1" id="yearSlider" aria-label="Move through time">
+    <span class="timeline-end">Today</span>
+  </div>
+</header>
+
+<main class="content" id="contentArea">
+  <section class="leads" id="leaders" aria-label="Heads of state and government"></section>
+
+  <section class="departments-section">
+    <div class="offices-head">
+      <h2>Departments <span class="count" id="departmentCount"></span></h2>
+    </div>
+    <p class="status-line" id="hint"></p>
+    <div class="department-grid" id="departmentGrid"></div>
+  </section>
+
+  <section class="departments-section" id="unassignedSection" hidden>
+    <details class="fold">
+      <summary><h2>Offices not linked to a department <span class="count" id="unassignedCount"></span></h2></summary>
+      <p class="fold-intro">
+        These offices existed on this date but Wikidata doesn't connect them to a department
+        (no P2389 on the office, or P2388 on a department). Some are abolished offices with no
+        end date recorded.
+      </p>
+      <ul class="office-list" id="unassignedList"></ul>
+    </details>
+  </section>
+
+  <section class="departments-section" id="emptySection" hidden>
+    <details class="fold">
+      <summary><h2>Departments with no offices recorded <span class="count" id="emptyCount"></span></h2></summary>
+      <p class="fold-intro">Wikidata lists these as departments on this date, but links no office to them that anyone held.</p>
+      <ul class="plain-list" id="emptyList"></ul>
+    </details>
+  </section>
+
+  <div class="loading" id="loadingOverlay" role="status">
+    <div class="spinner"></div>
+    <p>Loading departments from Wikidata. The first load for a country can take up to a minute.</p>
+  </div>
+</main>
+
+<script type="module" src="departments.js"></script>
+</body>
+</html>

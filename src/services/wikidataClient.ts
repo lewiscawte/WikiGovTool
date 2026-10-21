@@ -59,6 +59,9 @@ export interface PositionHistoryRow {
   partyLabel: string | null;
   start: string | null;
   end: string | null;
+  // True when P582 (end time) is Wikidata's "unknown value": the term is known to have ended,
+  // but not when. `end` is null in that case rather than the placeholder URI SPARQL returns.
+  endUnknown?: boolean;
   // Wikidata P18 ("image"), already bound by SPARQL as a full Commons Special:FilePath URL —
   // append `?width=<n>` directly to it to get a sized thumbnail, no filename parsing needed.
   imageUrl: string | null;
@@ -82,6 +85,12 @@ function buildHistoryQuery(qids: string[]): string {
 ORDER BY ?position DESC(?start)`;
 }
 
+// SPARQL returns Wikidata's "unknown value" as a skolem URI (http://www.wikidata.org/.well-known/genid/…)
+// rather than a date literal. Treat anything that isn't a literal as "no usable date".
+function dateValue(binding: any): string | null {
+  return binding?.type === 'literal' ? binding.value : null;
+}
+
 // Fetches the full holder history (not just the current holder) for a batch of position
 // QIDs in a single SPARQL query, so the timeline slider doesn't need one call per scrub.
 export async function fetchOfficeholderHistory(qids: string[]): Promise<PositionHistoryRow[]> {
@@ -100,8 +109,9 @@ export async function fetchOfficeholderHistory(qids: string[]): Promise<Position
     personQid: toQid(b.person.value),
     personLabel: b.personLabel?.value ?? '',
     partyLabel: b.partyLabel?.value ?? null,
-    start: b.start?.value ?? null,
-    end: b.end?.value ?? null,
+    start: dateValue(b.start),
+    end: dateValue(b.end),
+    endUnknown: Boolean(b.end) && dateValue(b.end) === null,
     imageUrl: b.image?.value ?? null,
   }));
   historyCache.set(cacheKey, rows);
@@ -265,5 +275,144 @@ export async function fetchDeputyPairs(qids: string[]): Promise<DeputyPair[]> {
     .filter((p: DeputyPair) => qidSet.has(p.juniorQid));
 
   deputyPairsCache.set(cacheKey, result);
+  return result;
+}
+async function runSparql(query: string): Promise<any[]> {
+  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
+  const data = await wdFetch(url);
+  return data.results?.bindings ?? [];
+}
+
+const valuesList = (qids: string[]) => qids.map((q) => `wd:${q}`).join(' ');
+
+export interface DepartmentLink {
+  positionQid: string;
+  departmentQid: string;
+}
+
+const departmentLinksCache = new TtlCache<DepartmentLink[]>(config.cacheTtlMs);
+
+// Which department each office runs. Wikidata records this from either end — P2389
+// ("organization directed by the office") on the office, or P2388 ("office held by head of
+// the organization") on the department — and coverage of the two differs, so check both.
+export async function fetchDepartmentLinks(positionQids: string[]): Promise<DepartmentLink[]> {
+  const validQids = positionQids.filter((q) => QID_RE.test(q));
+  if (validQids.length === 0) return [];
+  const cacheKey = validQids.slice().sort().join(',');
+  const cached = departmentLinksCache.get(cacheKey);
+  if (cached) return cached;
+
+  const bindings = await runSparql(`SELECT DISTINCT ?position ?dept WHERE {
+  VALUES ?position { ${valuesList(validQids)} }
+  { ?position wdt:P2389 ?dept . } UNION { ?dept wdt:P2388 ?position . }
+}`);
+  const result = bindings.map((b: any) => ({ positionQid: toQid(b.position.value), departmentQid: toQid(b.dept.value) }));
+  departmentLinksCache.set(cacheKey, result);
+  return result;
+}
+
+const departmentsOfClassCache = new TtlCache<string[]>(config.cacheTtlMs);
+
+// Every item that is directly an instance of a country-specific department class (e.g.
+// "United States federal executive department"), including abolished ones — this is what
+// lets the timeline show e.g. the Department of Health, Education, and Welfare in 1970,
+// whose head office isn't in the current cabinet list.
+export async function fetchDepartmentsOfClass(classQid: string): Promise<string[]> {
+  if (!QID_RE.test(classQid)) throw new Error('Invalid class QID');
+  const cached = departmentsOfClassCache.get(classQid);
+  if (cached) return cached;
+  const bindings = await runSparql(`SELECT DISTINCT ?dept WHERE { ?dept wdt:P31 wd:${classQid} . }`);
+  const result = bindings.map((b: any) => toQid(b.dept.value));
+  departmentsOfClassCache.set(classQid, result);
+  return result;
+}
+
+export interface DepartmentDetails {
+  qid: string;
+  label: string;
+  wikipediaTitle: string | null;
+  inception: string | null;
+  dissolved: string | null;
+}
+
+const departmentDetailsCache = new TtlCache<Map<string, DepartmentDetails>>(config.cacheTtlMs);
+
+export async function fetchDepartmentDetails(departmentQids: string[]): Promise<Map<string, DepartmentDetails>> {
+  const validQids = departmentQids.filter((q) => QID_RE.test(q));
+  if (validQids.length === 0) return new Map();
+  const cacheKey = validQids.slice().sort().join(',');
+  const cached = departmentDetailsCache.get(cacheKey);
+  if (cached) return cached;
+
+  // A department can carry several P571/P576 values (re-foundings, disputed dates): take the
+  // earliest inception and latest dissolution so it isn't hidden on a date it plausibly existed.
+  const bindings = await runSparql(`SELECT ?dept (SAMPLE(?label) AS ?deptLabel) (SAMPLE(?title) AS ?article)
+       (MIN(?inception) AS ?founded) (MAX(?dissolved) AS ?abolished) WHERE {
+  VALUES ?dept { ${valuesList(validQids)} }
+  OPTIONAL { ?dept rdfs:label ?label . FILTER(LANG(?label) = "en") }
+  OPTIONAL { ?dept wdt:P571 ?inception . }
+  OPTIONAL { ?dept wdt:P576 ?dissolved . }
+  OPTIONAL { ?a schema:about ?dept ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?title . }
+} GROUP BY ?dept`);
+
+  const result = new Map<string, DepartmentDetails>();
+  for (const b of bindings) {
+    const qid = toQid(b.dept.value);
+    result.set(qid, {
+      qid,
+      label: b.deptLabel?.value ?? qid,
+      wikipediaTitle: b.article?.value ?? null,
+      inception: b.founded?.value ?? null,
+      dissolved: b.abolished?.value ?? null,
+    });
+  }
+  departmentDetailsCache.set(cacheKey, result);
+  return result;
+}
+
+export interface DepartmentOfficeRow {
+  departmentQid: string;
+  positionQid: string;
+  positionLabel: string;
+  role: 'head' | 'member';
+}
+
+const departmentOfficesCache = new TtlCache<DepartmentOfficeRow[]>(config.cacheTtlMs);
+
+// The offices inside each department: its head (P2389 / P2388, as above) plus anything that
+// is P361 "part of" it. P361 also links agencies, armed forces, even military operations, so
+// rows are restricted to items someone has actually held (P39). Checking the position class
+// via P31/P279* instead is correct too but ~50x slower and times out for a whole government.
+export async function fetchDepartmentOffices(departmentQids: string[]): Promise<DepartmentOfficeRow[]> {
+  const validQids = departmentQids.filter((q) => QID_RE.test(q));
+  if (validQids.length === 0) return [];
+  const cacheKey = validQids.slice().sort().join(',');
+  const cached = departmentOfficesCache.get(cacheKey);
+  if (cached) return cached;
+
+  const bindings = await runSparql(`SELECT DISTINCT ?dept ?position ?positionLabel ?role WHERE {
+  VALUES ?dept { ${valuesList(validQids)} }
+  { ?position wdt:P2389 ?dept . BIND("head" AS ?role) }
+  UNION { ?dept wdt:P2388 ?position . BIND("head" AS ?role) }
+  UNION { ?position wdt:P361 ?dept . BIND("member" AS ?role) }
+  FILTER EXISTS { ?holder wdt:P39 ?position . }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}`);
+
+  // An office can match as both head and member (e.g. P2389 and P361 both set): head wins.
+  const byKey = new Map<string, DepartmentOfficeRow>();
+  for (const b of bindings) {
+    const row: DepartmentOfficeRow = {
+      departmentQid: toQid(b.dept.value),
+      positionQid: toQid(b.position.value),
+      positionLabel: b.positionLabel?.value ?? toQid(b.position.value),
+      role: b.role.value === 'head' ? 'head' : 'member',
+    };
+    const key = `${row.departmentQid}|${row.positionQid}`;
+    const existing = byKey.get(key);
+    if (!existing || (existing.role === 'member' && row.role === 'head')) byKey.set(key, row);
+  }
+  const result = [...byKey.values()];
+  departmentOfficesCache.set(cacheKey, result);
   return result;
 }

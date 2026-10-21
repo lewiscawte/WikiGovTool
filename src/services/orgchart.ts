@@ -14,6 +14,9 @@ export const UNITED_STATES_QID = 'Q30';
 
 function findActiveTerm(candidates: PositionHistoryRow[], date: Date): PositionHistoryRow | undefined {
   return candidates.find((r) => {
+    // An "unknown value" end date means Wikidata says the term is over, just not when, so it
+    // can't be shown as covering any date (same principle as pickTermForDate below).
+    if (r.endUnknown) return false;
     const start = r.start ? new Date(r.start) : null;
     const end = r.end ? new Date(r.end) : null;
     if (start && date < start) return false;
@@ -29,7 +32,7 @@ function findActiveTerm(candidates: PositionHistoryRow[], date: Date): PositionH
 // row is untrustworthy and dropped before matching.
 function sanitizeDatedRows(rows: PositionHistoryRow[]): PositionHistoryRow[] {
   const sorted = [...rows].sort((a, b) => new Date(b.start as string).getTime() - new Date(a.start as string).getTime());
-  return sorted.filter((r, i) => r.end || i === 0);
+  return sorted.filter((r, i) => r.end || r.endUnknown || i === 0);
 }
 
 function datedRowsForPosition(history: PositionHistoryRow[], positionQid: string): PositionHistoryRow[] {
@@ -141,13 +144,13 @@ async function loadDynamicPositions(countryQid: string): Promise<OrgChartPositio
 // its current officeholder is a separate, secondary question — an existing office with no
 // resolvable holder still shows (as a gap in officeholder data), but a nonexistent office
 // never shows regardless of what stale holder data might otherwise be found for it.
-function existedOn(position: OrgChartPosition, date: Date): boolean {
+export function existedOn(position: { inception: string | null; dissolved: string | null }, date: Date): boolean {
   if (position.inception && date < new Date(position.inception)) return false;
   if (position.dissolved && date >= new Date(position.dissolved)) return false;
   return true;
 }
 
-function buildEntry(position: OrgChartPosition, history: PositionHistoryRow[], date: Date): OrgChartEntry {
+export function buildEntry(position: OrgChartPosition, history: PositionHistoryRow[], date: Date): OrgChartEntry {
   if (!position.wikidataQid) return { position, officeholder: null, deputies: [] };
   const dated = datedRowsForPosition(history, position.wikidataQid);
   const term = pickTermForDate(dated, date);
@@ -167,8 +170,13 @@ function buildEntry(position: OrgChartPosition, history: PositionHistoryRow[], d
   };
 }
 
+// The country's cabinet-level offices: the curated seed list for the US, live discovery otherwise.
+export async function loadCabinetPositions(countryQid: string): Promise<OrgChartPosition[]> {
+  return countryQid === UNITED_STATES_QID ? loadStaticPositions() : loadDynamicPositions(countryQid);
+}
+
 export async function buildOrgChart(date: Date, countryQid: string = UNITED_STATES_QID): Promise<OrgChartEntry[]> {
-  const rawPositions = countryQid === UNITED_STATES_QID ? await loadStaticPositions() : await loadDynamicPositions(countryQid);
+  const rawPositions = await loadCabinetPositions(countryQid);
   const qids = rawPositions.map((p) => p.wikidataQid).filter((q): q is string => !!q);
   const [history, lifespans, deputyPairs] = await Promise.all([
     fetchOfficeholderHistory(qids),

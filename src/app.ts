@@ -5,6 +5,7 @@ import session from 'express-session';
 import { config } from './config';
 import { positionsRouter } from './routes/positions';
 import { orgchartRouter } from './routes/orgchart';
+import { departmentsRouter } from './routes/departments';
 import { wikidataRouter } from './routes/wikidata';
 import { wikipediaRouter } from './routes/wikipedia';
 import { infoboxRouter } from './routes/infobox';
@@ -29,6 +30,7 @@ export function createApp() {
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/api/positions', positionsRouter);
   app.use('/api/orgchart', orgchartRouter);
+  app.use('/api/departments', departmentsRouter);
   app.use('/api/wikidata', wikidataRouter);
   app.use('/api/wikipedia', wikipediaRouter);
   app.use('/api/infobox', infoboxRouter);
