@@ -4,138 +4,148 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cabinet Explorer</title>
-<link rel="stylesheet" href="design-system.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libertinus+Serif:ital,wght@0,400;0,600;1,400&family=Public+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
-<nav class="nav">
-  <span class="nav-brand">Cabinet Explorer</span>
-  <a href="#" aria-current="page">Chart</a>
-  <a href="#" id="historyLink" title="Not built yet — see GET /api/positions/:id/history">History</a>
-  <select class="input" id="countrySelect" style="max-width:220px;min-height:auto;padding:6px 8px"></select>
-  <label class="debug-toggle" title="Show Wikidata QIDs next to offices and officeholders">
-    <input type="checkbox" id="debugToggle"> Debug
-  </label>
-  <button type="button" class="btn btn-primary" id="loginToggle">Log in with Wikimedia</button>
-</nav>
+<header class="masthead">
+  <div class="toolbar">
+    <span class="brand">Cabinet Explorer</span>
+    <label class="toggle" title="Show Wikidata QIDs next to offices and officeholders">
+      <input type="checkbox" id="debugToggle"> Show QIDs
+    </label>
+    <button type="button" class="btn" id="loginToggle">Log in with Wikimedia</button>
+  </div>
 
-<div class="wrap">
+  <h1 class="headline">
+    Government of
+    <select class="headline-control" id="countrySelect" aria-label="Country"></select>
+    on
+    <input type="date" class="headline-control" id="dateInput" aria-label="Date">
+  </h1>
+  <p class="cabinet" id="yearLabel"></p>
+
   <div class="timeline">
-    <label>Timeline</label>
-    <input type="range" step="1" id="yearSlider">
-    <input type="date" class="input" id="dateInput" style="max-width:160px;min-height:auto;padding:6px 8px">
-    <div class="year" id="yearLabel"></div>
+    <span class="timeline-end">1900</span>
+    <input type="range" step="1" id="yearSlider" aria-label="Move through time">
+    <span class="timeline-end">Today</span>
   </div>
+</header>
 
-  <div class="content-area" id="contentArea">
-    <div class="hero" id="hero"></div>
+<main class="content" id="contentArea">
+  <section class="leads" id="hero" aria-label="Heads of state and government"></section>
 
-    <div class="section-title">Cabinet Departments</div>
-    <div class="grid" id="deptGrid"></div>
-    <p class="hint" id="hint">Click any office above to review its Wikidata linkage and generate infobox data.</p>
-
-    <div class="loading-overlay" id="loadingOverlay">
-      <div class="spinner"></div>
-      <div class="loading-text">Loading office data…</div>
+  <section class="offices">
+    <div class="offices-head">
+      <h2>Offices <span class="count" id="officeCount"></span></h2>
+      <button type="button" class="btn" id="addOfficeBtn">Add office</button>
     </div>
+    <p class="status-line" id="hint"></p>
+    <ul class="office-list" id="deptGrid"></ul>
+  </section>
+
+  <div class="loading" id="loadingOverlay" role="status">
+    <div class="spinner"></div>
+    <p>Loading offices from Wikidata. The first load for a country can take up to a minute.</p>
   </div>
-</div>
+</main>
 
 <div class="dialog-backdrop" id="addOfficeBackdrop">
-  <div class="dialog" role="dialog" aria-modal="true" style="width:440px">
-    <div class="dialog-title">Add office</div>
-    <div class="dialog-body">
-      <p class="status-line" style="margin-top:0">
-        Creates a local stub for an office that exists in government but has no Wikidata item yet
-        (or none we've found). Does not create anything on Wikidata itself.
-      </p>
-      <div class="field"><label>Office title</label><input class="input" id="new-office-title" placeholder="e.g. Minister for Widgets"></div>
-      <div class="field"><label>Department</label><input class="input" id="new-office-dept" placeholder="Minister"></div>
-      <div class="field"><label>Wikipedia sitelink (if known)</label><input class="input" id="new-office-wp"></div>
-      <p class="status-line" id="addOfficeStatus"></p>
-    </div>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="addOfficeTitle">
+    <h2 class="dialog-title" id="addOfficeTitle">Add office</h2>
+    <p class="dialog-intro">
+      Adds a local entry for an office that exists in government but has no Wikidata item
+      we can find. Nothing is created on Wikidata.
+    </p>
+    <div class="field"><label for="new-office-title">Office title</label><input class="input" id="new-office-title" placeholder="e.g. Minister for Widgets"></div>
+    <div class="field"><label for="new-office-dept">Department</label><input class="input" id="new-office-dept" placeholder="e.g. Department for Business and Trade"></div>
+    <div class="field"><label for="new-office-wp">Wikipedia article, if there is one</label><input class="input" id="new-office-wp"></div>
+    <p class="status-line" id="addOfficeStatus"></p>
     <div class="dialog-actions">
-      <button type="button" class="btn btn-secondary" id="addOfficeCancelBtn">Cancel</button>
-      <button type="button" class="btn btn-primary" id="addOfficeSubmitBtn">Create locally</button>
+      <button type="button" class="btn" id="addOfficeCancelBtn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="addOfficeSubmitBtn">Add office</button>
     </div>
   </div>
 </div>
 
 <div class="dialog-backdrop" id="backdrop">
-  <div class="dialog" role="dialog" aria-modal="true">
-    <div class="dialog-title" id="dialogTitle">Edit office</div>
-    <div class="dialog-body">
-      <div class="field"><label>Office</label><input class="input" id="f-office"></div>
-      <div class="grid-2">
-        <div class="field"><label>Wikidata item (office)</label><input class="input" placeholder="Q…" id="f-qid"></div>
-        <div class="field"><label>Wikipedia sitelink (office)</label><input class="input" id="f-officewp"></div>
-      </div>
-      <button type="button" class="btn btn-secondary btn-block" id="pullOfficeBtn">Pull office info from Wikipedia</button>
+  <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <h2 class="dialog-title" id="dialogTitle">Office</h2>
 
-      <div class="compare">
-        <div class="compare-row compare-head"><span></span><span>Wikidata</span><span>Wikipedia</span><span></span></div>
-        <div class="compare-row">
-          <span class="compare-label">Department</span>
-          <input class="input" id="f-dept">
-          <span class="compare-wiki" id="wp-dept">—</span>
-          <button type="button" class="copy-btn" data-target="dept" disabled title="Copy Wikipedia value">←</button>
-        </div>
-        <div class="compare-row">
-          <span class="compare-label">Inception date</span>
-          <input class="input" id="f-inception">
-          <span class="compare-wiki" id="wp-inception">—</span>
-          <button type="button" class="copy-btn" data-target="inception" disabled title="Copy Wikipedia value">←</button>
-        </div>
-        <div class="compare-row">
-          <span class="compare-label">Abolition date</span>
-          <input class="input" id="f-dissolved" placeholder="Still exists">
-          <span class="compare-wiki" id="wp-dissolved">—</span>
-          <button type="button" class="copy-btn" data-target="dissolved" disabled title="Copy Wikipedia value">←</button>
-        </div>
-      </div>
-
-      <div class="kicker" style="margin-top:var(--space-2)">Officeholder</div>
-      <div class="field"><label>Wikipedia sitelink</label><input class="input" id="f-wp"></div>
-      <button type="button" class="btn btn-secondary btn-block" id="pullBtn">Pull officeholder info from Wikipedia</button>
-
-      <div class="compare">
-        <div class="compare-row compare-head"><span></span><span>Wikidata</span><span>Wikipedia</span><span></span></div>
-        <div class="compare-row">
-          <span class="compare-label">Name</span>
-          <input class="input" id="f-name">
-          <span class="compare-wiki" id="wp-name">—</span>
-          <button type="button" class="copy-btn" data-target="name" disabled title="Copy Wikipedia value">←</button>
-        </div>
-        <div class="compare-row">
-          <span class="compare-label">Party</span>
-          <input class="input" id="f-party">
-          <span class="compare-wiki" id="wp-party">—</span>
-          <button type="button" class="copy-btn" data-target="party" disabled title="Copy Wikipedia value">←</button>
-        </div>
-        <div class="compare-row">
-          <span class="compare-label">Start date</span>
-          <input class="input" id="f-start">
-          <span class="compare-wiki" id="wp-start">—</span>
-          <button type="button" class="copy-btn" data-target="start" disabled title="Copy Wikipedia value">←</button>
-        </div>
-        <div class="compare-row">
-          <span class="compare-label">End date</span>
-          <input class="input" id="f-end" placeholder="Incumbent">
-          <span class="compare-wiki" id="wp-end">—</span>
-          <button type="button" class="copy-btn" data-target="end" disabled title="Copy Wikipedia value">←</button>
-        </div>
-      </div>
-
-      <p class="status-line" id="dialogStatus"></p>
-      <details class="infobox-details">
-        <summary>Generate infobox wikitext (secondary — for copying into Wikipedia)</summary>
-        <pre id="infobox"></pre>
-      </details>
+    <h3 class="dialog-section">Office</h3>
+    <div class="field"><label for="f-office">Title on Wikidata</label><input class="input" id="f-office"></div>
+    <div class="grid-2">
+      <div class="field"><label for="f-qid">Wikidata item</label><input class="input" placeholder="Q…" id="f-qid"></div>
+      <div class="field"><label for="f-officewp">Wikipedia article</label><input class="input" id="f-officewp"></div>
     </div>
+    <button type="button" class="btn" id="pullOfficeBtn">Compare office with Wikipedia</button>
+
+    <div class="compare">
+      <div class="compare-row compare-head"><span></span><span class="voice-wd">Wikidata</span><span class="voice-wp">Wikipedia</span><span></span></div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-dept">Department</label>
+        <input class="input" id="f-dept">
+        <span class="compare-wiki" id="wp-dept">—</span>
+        <button type="button" class="copy-btn" data-target="dept" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia department">←</button>
+      </div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-inception">Created</label>
+        <input class="input" id="f-inception">
+        <span class="compare-wiki" id="wp-inception">—</span>
+        <button type="button" class="copy-btn" data-target="inception" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia creation date">←</button>
+      </div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-dissolved">Abolished</label>
+        <input class="input" id="f-dissolved" placeholder="Still exists">
+        <span class="compare-wiki" id="wp-dissolved">—</span>
+        <button type="button" class="copy-btn" data-target="dissolved" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia abolition date">←</button>
+      </div>
+    </div>
+
+    <h3 class="dialog-section">Officeholder</h3>
+    <div class="field"><label for="f-wp">Wikipedia article</label><input class="input" id="f-wp"></div>
+    <button type="button" class="btn" id="pullBtn">Compare officeholder with Wikipedia</button>
+
+    <div class="compare">
+      <div class="compare-row compare-head"><span></span><span class="voice-wd">Wikidata</span><span class="voice-wp">Wikipedia</span><span></span></div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-name">Name</label>
+        <input class="input" id="f-name">
+        <span class="compare-wiki" id="wp-name">—</span>
+        <button type="button" class="copy-btn" data-target="name" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia name">←</button>
+      </div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-party">Party</label>
+        <input class="input" id="f-party">
+        <span class="compare-wiki" id="wp-party">—</span>
+        <button type="button" class="copy-btn" data-target="party" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia party">←</button>
+      </div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-start">Took office</label>
+        <input class="input" id="f-start">
+        <span class="compare-wiki" id="wp-start">—</span>
+        <button type="button" class="copy-btn" data-target="start" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia start date">←</button>
+      </div>
+      <div class="compare-row">
+        <label class="compare-label" for="f-end">Left office</label>
+        <input class="input" id="f-end" placeholder="Incumbent">
+        <span class="compare-wiki" id="wp-end">—</span>
+        <button type="button" class="copy-btn" data-target="end" disabled title="Use the Wikipedia value" aria-label="Use the Wikipedia end date">←</button>
+      </div>
+    </div>
+
+    <p class="status-line" id="dialogStatus"></p>
+    <details class="infobox-details">
+      <summary>Infobox wikitext for Wikipedia</summary>
+      <pre id="infobox"></pre>
+    </details>
+
     <div class="dialog-actions">
-      <button type="button" class="btn btn-secondary" id="linkBtn">Update local link</button>
-      <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+      <button type="button" class="btn" id="linkBtn">Save link locally</button>
+      <button type="button" class="btn" id="cancelBtn">Close</button>
       <button type="button" class="btn btn-primary" id="saveBtn">Save to Wikidata</button>
     </div>
   </div>

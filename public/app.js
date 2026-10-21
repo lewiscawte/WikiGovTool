@@ -13,6 +13,7 @@ const isoDate = (date) => date.toISOString().slice(0, 10);
 const heroEl = document.getElementById('hero');
 const gridEl = document.getElementById('deptGrid');
 const hintEl = document.getElementById('hint');
+const officeCountEl = document.getElementById('officeCount');
 const slider = document.getElementById('yearSlider');
 const dateInput = document.getElementById('dateInput');
 const yearLabel = document.getElementById('yearLabel');
@@ -65,10 +66,6 @@ let currentPositionId = null;
 let currentCountryQid = US_QID;
 let entries = [];
 
-function formatDate(dayIndex) {
-  return dateForDayIndex(dayIndex).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
 function isViewingToday() {
   return Number(slider.value) === dayIndexFor(new Date());
 }
@@ -81,7 +78,7 @@ function tenureLabel(officeholder) {
   if (!officeholder?.startDate) return '';
   const start = officeholder.startDate.slice(0, 10);
   const end = officeholder.endDate ? officeholder.endDate.slice(0, 10) : null;
-  if (isViewingToday() && !end) return `Since ${start}`;
+  if (isViewingToday() && !end) return `since ${start}`;
   return `${start} – ${end || 'present'}`;
 }
 
@@ -162,15 +159,16 @@ function deputiesDropdown(deputies) {
   wrap.className = 'deputies';
   const label = document.createElement('div');
   label.className = 'deputies-label';
-  label.textContent = deputies.length === 1 ? 'Deputy role' : `Deputy roles (${deputies.length})`;
+  label.textContent = deputies.length === 1 ? 'Deputy' : `Deputies (${deputies.length})`;
   const select = document.createElement('select');
   select.className = 'input deputy-select';
+  select.setAttribute('aria-label', label.textContent);
   deputies.forEach((dep) => {
     const opt = document.createElement('option');
     const qidSuffix = debugMode
       ? ` [${dep.position.wikidataQid || '?'} / ${dep.officeholder?.personWikidataQid || '?'}]`
       : '';
-    opt.textContent = `${dep.position.title} — ${displayName(dep.officeholder?.personName)}${qidSuffix}`;
+    opt.textContent = `${dep.position.title}: ${displayName(dep.officeholder?.personName)}${qidSuffix}`;
     select.appendChild(opt);
   });
   select.addEventListener('click', (e) => e.stopPropagation());
@@ -180,160 +178,134 @@ function deputiesDropdown(deputies) {
 
 // Wikidata P18 ("image") arrives as a ready-to-use Commons Special:FilePath URL — append
 // `?width=<n>` directly for a sized thumbnail (no filename parsing needed). Falls back to the
-// existing placeholder swatch when there's no image, or if the image URL fails to load.
-function officeholderImageEl(imageUrl, width, placeholderClass) {
-  if (!imageUrl) {
-    const placeholder = document.createElement('div');
-    placeholder.className = placeholderClass;
-    return placeholder;
-  }
+// officeholder's initials when there's no image, or if the image URL fails to load.
+function initialsFor(name) {
+  if (!name || QID_ONLY_RE.test(name)) return '';
+  const parts = name.trim().split(/\s+/);
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+function officeholderImageEl(officeholder, width, className) {
+  const placeholder = () => {
+    const el = document.createElement('div');
+    el.className = className;
+    el.setAttribute('aria-hidden', 'true');
+    el.textContent = initialsFor(officeholder?.personName);
+    return el;
+  };
+  if (!officeholder?.imageUrl) return placeholder();
   const img = document.createElement('img');
-  img.className = placeholderClass;
-  img.src = `${imageUrl}?width=${width}`;
+  img.className = className;
+  img.src = `${officeholder.imageUrl}?width=${width}`;
   img.alt = '';
   img.loading = 'lazy';
-  img.addEventListener('error', () => {
-    const placeholder = document.createElement('div');
-    placeholder.className = placeholderClass;
-    img.replaceWith(placeholder);
-  }, { once: true });
+  img.addEventListener('error', () => img.replaceWith(placeholder()), { once: true });
   return img;
+}
+
+// "Keir Starmer, since 2024-07-05" — name and tenure as one line, tenure muted.
+function holderLine(className, officeholder) {
+  const line = document.createElement('p');
+  line.className = className;
+  if (!officeholder?.personName) {
+    line.classList.add('office-empty');
+    line.textContent = 'No officeholder recorded for this date';
+    return line;
+  }
+  line.append(document.createTextNode(displayName(officeholder.personName)));
+  const holderQidTag = qidTag(officeholder.personWikidataQid);
+  if (holderQidTag) line.appendChild(holderQidTag);
+  const tenure = document.createElement('span');
+  tenure.className = 'tenure';
+  tenure.textContent = tenureLabel(officeholder);
+  line.appendChild(tenure);
+  return line;
 }
 
 // Office-first: the position title is the prominent heading, the officeholder is
 // secondary/supporting detail — the org chart's subject is the office, not the person.
-function heroCard(officeTitle, officeQid, officeholder, deputies) {
-  const card = document.createElement('div');
-  card.className = 'hero-card';
-  const photo = officeholderImageEl(officeholder?.imageUrl, 250, 'photo');
-  const officeEl = document.createElement('div');
-  officeEl.className = 'hero-office';
-  officeEl.append(document.createTextNode(officeTitle));
-  const officeQidTag = qidTag(officeQid);
+function leadCard(entry, fallbackTitle) {
+  const card = document.createElement('article');
+  card.className = 'lead';
+  const photo = officeholderImageEl(entry?.officeholder, 200, 'portrait');
+  const text = document.createElement('div');
+  const officeEl = document.createElement('h2');
+  officeEl.className = 'lead-office';
+  officeEl.append(document.createTextNode(entry?.position.title || fallbackTitle));
+  const officeQidTag = qidTag(entry?.position.wikidataQid);
   if (officeQidTag) officeEl.appendChild(officeQidTag);
-  const holderRow = document.createElement('div');
-  holderRow.className = 'hero-holder';
-  const holderLabel = document.createElement('div');
-  holderLabel.className = 'hero-holder-label';
-  holderLabel.textContent = 'Officeholder';
-  const holderNameEl = document.createElement('div');
-  holderNameEl.className = 'hero-holder-name';
-  holderNameEl.append(document.createTextNode(officeholder?.personName ? displayName(officeholder.personName) : '—'));
-  const holderQidTag = qidTag(officeholder?.personWikidataQid);
-  if (holderQidTag) holderNameEl.appendChild(holderQidTag);
-  holderRow.append(holderLabel, holderNameEl);
-  card.append(photo, officeEl, holderRow);
-  const dd = deputiesDropdown(deputies);
-  if (dd) card.appendChild(dd);
+  text.append(officeEl, holderLine('lead-holder', entry?.officeholder));
+  const dd = deputiesDropdown(entry?.deputies);
+  if (dd) text.appendChild(dd);
+  card.append(photo, text);
   return card;
 }
 
 function renderHero(currentEntries) {
   heroEl.innerHTML = '';
   if (currentCountryQid === US_QID) {
-    const president = currentEntries.find((e) => e.position.id === 'president');
-    heroEl.append(
-      heroCard(
-        president?.position.title || 'President',
-        president?.position.wikidataQid,
-        president?.officeholder,
-        president?.deputies,
-      ),
-    );
+    heroEl.append(leadCard(currentEntries.find((e) => e.position.id === 'president'), 'President'));
   } else {
-    const headOfState = currentEntries.find((e) => e.position.bucket === 'Head of State');
-    const headOfGovernment = currentEntries.find((e) => e.position.bucket === 'Head of Government');
     heroEl.append(
-      heroCard(
-        headOfState?.position.title || 'Head of State',
-        headOfState?.position.wikidataQid,
-        headOfState?.officeholder,
-        headOfState?.deputies,
-      ),
-      heroCard(
-        headOfGovernment?.position.title || 'Head of Government',
-        headOfGovernment?.position.wikidataQid,
-        headOfGovernment?.officeholder,
-        headOfGovernment?.deputies,
-      ),
+      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of State'), 'Head of State'),
+      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of Government'), 'Head of Government'),
     );
   }
-  const blurb = document.createElement('div');
-  blurb.className = 'hero-blurb';
-  const p = document.createElement('p');
-  p.textContent = 'Select an office below to review its Wikidata linkage and generate infobox data.';
-  blurb.appendChild(p);
-  heroEl.appendChild(blurb);
+}
+
+function officeRow(entry) {
+  const { position, officeholder } = entry;
+  const row = document.createElement('li');
+  row.className = 'office';
+
+  const title = document.createElement('h3');
+  title.className = 'office-title';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'office-open';
+  open.textContent = position.title;
+  open.addEventListener('click', () => openDialog(entry));
+  title.appendChild(open);
+  const officeQidTag = qidTag(position.wikidataQid);
+  if (officeQidTag) title.appendChild(officeQidTag);
+
+  const linkState = document.createElement('span');
+  linkState.className = position.wikidataQid ? 'link-state' : 'link-state unlinked';
+  linkState.textContent = position.wikidataQid ? 'On Wikidata' : 'Not on Wikidata';
+
+  const dept = document.createElement('p');
+  dept.className = 'office-dept';
+  dept.textContent = position.department;
+
+  row.append(officeholderImageEl(officeholder, 96, 'portrait portrait-sm'), title, linkState, dept, holderLine('office-holder', officeholder));
+  const dd = deputiesDropdown(entry.deputies);
+  if (dd) row.appendChild(dd);
+  return row;
 }
 
 function renderGrid(currentEntries) {
   gridEl.innerHTML = '';
-  currentEntries
-    .filter((e) => !isHeroEntry(e))
-    .forEach((entry) => {
-      const { position, officeholder } = entry;
-      const el = document.createElement('div');
-      el.className = 'dept';
-
-      const top = document.createElement('div');
-      top.className = 'top';
-      const tag = document.createElement('span');
-      tag.className = 'tag ' + (position.wikidataQid ? 'tag-accent' : 'tag-outline');
-      tag.textContent = position.department;
-      top.appendChild(tag);
-      const officeQidTag = qidTag(position.wikidataQid);
-      if (officeQidTag) top.appendChild(officeQidTag);
-
-      const officeName = document.createElement('div');
-      officeName.className = 'officeName';
-      officeName.textContent = position.title;
-
-      const holderSub = document.createElement('div');
-      holderSub.className = 'holderSub';
-      const holderLabel = document.createElement('div');
-      holderLabel.className = 'holderLabel';
-      holderLabel.textContent = 'Officeholder';
-      const holderRow = document.createElement('div');
-      holderRow.style.display = 'flex';
-      holderRow.style.gap = 'var(--space-2)';
-      holderRow.style.alignItems = 'center';
-      const mini = officeholderImageEl(officeholder?.imageUrl, 20, 'mini');
-      const holderText = document.createElement('div');
-      const holder = document.createElement('div');
-      holder.className = 'holder';
-      holder.append(document.createTextNode(displayName(officeholder?.personName)));
-      const holderQidTag = qidTag(officeholder?.personWikidataQid);
-      if (holderQidTag) holder.appendChild(holderQidTag);
-      const since = document.createElement('div');
-      since.className = 'since';
-      since.textContent = tenureLabel(officeholder);
-      holderText.append(holder, since);
-      holderRow.append(mini, holderText);
-      holderSub.append(holderLabel, holderRow);
-
-      el.append(top, officeName, holderSub);
-      const dd = deputiesDropdown(entry.deputies);
-      if (dd) el.appendChild(dd);
-      el.addEventListener('click', () => openDialog(entry));
-      gridEl.appendChild(el);
-    });
-
-  const addCard = document.createElement('div');
-  addCard.className = 'add-office-card';
-  addCard.innerHTML = '<div class="plus">+</div><div class="label">Add office</div>';
-  addCard.addEventListener('click', openAddOfficeDialog);
-  gridEl.appendChild(addCard);
+  const offices = currentEntries.filter((e) => !isHeroEntry(e));
+  officeCountEl.textContent = offices.length ? String(offices.length) : '';
+  if (offices.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'empty-state';
+    empty.textContent = 'No offices found on Wikidata for this date. Try a later date, or add an office that is missing.';
+    gridEl.appendChild(empty);
+    return;
+  }
+  offices.forEach((entry) => gridEl.appendChild(officeRow(entry)));
 }
 
 function updateTimelineLabel() {
-  const idx = Number(slider.value);
-  const cabinet = cabinetLabelFor(entries);
-  yearLabel.textContent = cabinet ? `${formatDate(idx)} — ${cabinet}` : formatDate(idx);
+  yearLabel.textContent = cabinetLabelFor(entries);
+  yearLabel.classList.remove('stale');
 }
 
 async function loadOrgChart(date, countryQid) {
   currentCountryQid = countryQid;
-  hintEl.textContent = 'Loading…';
+  hintEl.textContent = '';
+  hintEl.className = 'status-line';
   loadingOverlay.classList.add('active');
   try {
     const data = await api(`/api/orgchart?date=${date}&country=${countryQid}`);
@@ -341,9 +313,10 @@ async function loadOrgChart(date, countryQid) {
     renderHero(entries);
     renderGrid(entries);
     updateTimelineLabel();
-    hintEl.textContent = 'Click any office above to review its Wikidata linkage and generate infobox data.';
+    hintEl.textContent = 'Select an office to compare its Wikidata and Wikipedia data.';
   } catch (err) {
-    hintEl.textContent = `Failed to load org chart: ${err.message}`;
+    hintEl.textContent = `Couldn't load offices: ${err.message}. Try again, or pick another date.`;
+    hintEl.className = 'status-line error';
   } finally {
     loadingOverlay.classList.remove('active');
   }
@@ -361,14 +334,14 @@ function initTimeline() {
   dateInput.min = isoDate(EPOCH);
   dateInput.max = isoDate(new Date());
   dateInput.value = currentDateParam();
-  yearLabel.textContent = formatDate(todayIdx);
+  yearLabel.textContent = '';
 }
 
 slider.addEventListener('input', (e) => {
   // Live-drag only updates the date — the cabinet name needs a fresh fetch, which happens
   // on 'change' (drag release) via updateTimelineLabel().
   const idx = Number(e.target.value);
-  yearLabel.textContent = formatDate(idx);
+  yearLabel.classList.add('stale');
   dateInput.value = isoDate(dateForDayIndex(idx));
 });
 slider.addEventListener('change', () => {
@@ -380,12 +353,12 @@ dateInput.addEventListener('change', () => {
   const idx = dayIndexFor(new Date(`${dateInput.value}T00:00:00Z`));
   const clamped = Math.min(Math.max(idx, Number(slider.min)), Number(slider.max));
   slider.value = String(clamped);
-  yearLabel.textContent = formatDate(clamped);
+  yearLabel.classList.add('stale');
   loadOrgChart(currentDateParam(), currentCountryQid);
 });
 
 countrySelect.addEventListener('change', () => {
-  yearLabel.textContent = formatDate(Number(slider.value));
+  yearLabel.classList.add('stale');
   loadOrgChart(currentDateParam(), countrySelect.value);
 });
 
@@ -401,7 +374,8 @@ async function populateCountries() {
     }
     countrySelect.value = US_QID;
   } catch (err) {
-    hintEl.textContent = `Failed to load country list: ${err.message}`;
+    hintEl.textContent = `Couldn't load the country list: ${err.message}`;
+    hintEl.className = 'status-line error';
   }
 }
 
@@ -420,7 +394,7 @@ async function refreshInfobox() {
     });
     infoboxPre.textContent = wikitext.wikitext;
   } catch (err) {
-    infoboxPre.textContent = `(could not generate: ${err.message})`;
+    infoboxPre.textContent = `Couldn't generate wikitext: ${err.message}`;
   }
 }
 
@@ -429,10 +403,10 @@ Object.values(dialogFields).forEach((input) => input.addEventListener('input', (
 async function openDialog(entry) {
   const { position, officeholder } = entry;
   currentPositionId = position.id;
-  dialogTitle.textContent = `${position.title} — Wikidata & Infobox`;
+  dialogTitle.textContent = position.title;
   dialogStatus.textContent = '';
   dialogStatus.className = 'status-line';
-  linkBtn.style.display = position.dynamic ? 'none' : '';
+  linkBtn.hidden = Boolean(position.dynamic);
 
   dialogFields.office.value = position.title;
   dialogFields.dept.value = position.department;
@@ -474,6 +448,11 @@ function closeDialog() {
 }
 
 document.getElementById('cancelBtn').addEventListener('click', closeDialog);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (addOfficeBackdrop.classList.contains('open')) closeAddOfficeDialog();
+  else if (backdrop.classList.contains('open')) closeDialog();
+});
 backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeDialog(); });
 
 function openAddOfficeDialog() {
@@ -490,6 +469,7 @@ function closeAddOfficeDialog() {
   addOfficeBackdrop.classList.remove('open');
 }
 
+document.getElementById('addOfficeBtn').addEventListener('click', openAddOfficeDialog);
 document.getElementById('addOfficeCancelBtn').addEventListener('click', closeAddOfficeDialog);
 addOfficeBackdrop.addEventListener('click', (e) => { if (e.target === addOfficeBackdrop) closeAddOfficeDialog(); });
 
@@ -513,7 +493,7 @@ document.getElementById('addOfficeSubmitBtn').addEventListener('click', async ()
     closeAddOfficeDialog();
     await loadOrgChart(currentDateParam(), currentCountryQid);
   } catch (err) {
-    addOfficeStatus.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Failed to add office: ${err.message}`;
+    addOfficeStatus.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't add the office: ${err.message}`;
     addOfficeStatus.className = 'status-line error';
   }
 });
@@ -547,11 +527,11 @@ document.querySelectorAll('.copy-btn').forEach((btn) => {
 document.getElementById('pullBtn').addEventListener('click', async () => {
   const title = dialogFields.wp.value.trim();
   if (!title) {
-    dialogStatus.textContent = 'Enter a Wikipedia sitelink for the officeholder first.';
+    dialogStatus.textContent = "Enter the officeholder's Wikipedia article first.";
     dialogStatus.className = 'status-line error';
     return;
   }
-  dialogStatus.textContent = `Pulling infobox from "${title}"…`;
+  dialogStatus.textContent = `Reading the infobox on "${title}"…`;
   dialogStatus.className = 'status-line';
   try {
     const { fields } = await api(`/api/wikipedia/infobox?title=${encodeURIComponent(title)}`);
@@ -559,10 +539,10 @@ document.getElementById('pullBtn').addEventListener('click', async () => {
     fillCompareCell('party', fields.party || '');
     fillCompareCell('start', fields.term_start || '');
     fillCompareCell('end', fields.term_end || '');
-    dialogStatus.textContent = `Pulled officeholder infobox data from the "${title}" Wikipedia sitelink — review and copy any fields you want on the left.`;
+    dialogStatus.textContent = `Compared with "${title}". Fields marked ≠ differ; use ← to copy a Wikipedia value across.`;
     dialogStatus.className = 'status-line';
   } catch (err) {
-    dialogStatus.textContent = `Pull failed: ${err.message}`;
+    dialogStatus.textContent = `Couldn't read "${title}": ${err.message}`;
     dialogStatus.className = 'status-line error';
   }
 });
@@ -574,21 +554,21 @@ document.getElementById('pullBtn').addEventListener('click', async () => {
 pullOfficeBtn.addEventListener('click', async () => {
   const title = dialogFields.officewp.value.trim();
   if (!title) {
-    dialogStatus.textContent = 'Enter a Wikipedia sitelink for the office first.';
+    dialogStatus.textContent = "Enter the office's Wikipedia article first.";
     dialogStatus.className = 'status-line error';
     return;
   }
-  dialogStatus.textContent = `Pulling office infobox from "${title}"…`;
+  dialogStatus.textContent = `Reading the infobox on "${title}"…`;
   dialogStatus.className = 'status-line';
   try {
     const { fields } = await api(`/api/wikipedia/office-infobox?title=${encodeURIComponent(title)}`);
     fillCompareCell('dept', fields.department || fields.body || '');
     fillCompareCell('inception', fields.formation || '');
     fillCompareCell('dissolved', fields.abolished || '');
-    dialogStatus.textContent = `Pulled office infobox data from the "${title}" Wikipedia sitelink — review and copy any fields you want on the left.`;
+    dialogStatus.textContent = `Compared with "${title}". Fields marked ≠ differ; use ← to copy a Wikipedia value across.`;
     dialogStatus.className = 'status-line';
   } catch (err) {
-    dialogStatus.textContent = `Office pull failed: ${err.message}`;
+    dialogStatus.textContent = `Couldn't read "${title}": ${err.message}`;
     dialogStatus.className = 'status-line error';
   }
 });
@@ -600,11 +580,11 @@ linkBtn.addEventListener('click', async () => {
       method: 'PUT',
       body: JSON.stringify({ wikidataQid: dialogFields.qid.value.trim(), wikipediaTitle: dialogFields.officewp.value.trim() }),
     });
-    dialogStatus.textContent = 'Local link updated.';
+    dialogStatus.textContent = 'Link saved locally.';
     dialogStatus.className = 'status-line';
     await loadOrgChart(currentDateParam(), currentCountryQid);
   } catch (err) {
-    dialogStatus.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Link update failed: ${err.message}`;
+    dialogStatus.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't save the link: ${err.message}`;
     dialogStatus.className = 'status-line error';
   }
 });
@@ -621,7 +601,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
 async function refreshLoginState() {
   try {
     const { user } = await api('/api/auth/me');
-    loginToggle.textContent = `Editor Mode: On (${user.username})`;
+    loginToggle.textContent = `Log out (${user.username})`;
     loginToggle.dataset.loggedIn = 'true';
   } catch {
     loginToggle.textContent = 'Log in with Wikimedia';
@@ -637,8 +617,6 @@ loginToggle.addEventListener('click', async () => {
   }
   await refreshLoginState();
 });
-
-document.getElementById('historyLink').addEventListener('click', (e) => e.preventDefault());
 
 debugToggle.addEventListener('change', () => {
   debugMode = debugToggle.checked;
