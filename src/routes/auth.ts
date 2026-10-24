@@ -48,6 +48,23 @@ async function loadProfile(req: Request): Promise<void> {
   };
 }
 
+type OAuthSession = NonNullable<Request['session']['oauth']>;
+
+// Logs the user in on a brand-new session (fresh id), so a session id known before login,
+// e.g. one planted on the victim, never becomes an authenticated session.
+function startLoggedInSession(req: Request, oauth: OAuthSession): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      req.session.oauth = oauth;
+      loadProfile(req).then(resolve, reject);
+    });
+  });
+}
+
 // Owner-only consumer login (OAUTH_OWNER_ONLY=true): no redirect, the session just takes the
 // consumer's own access token. For local testing — see config.oauth.ownerOnly.
 async function ownerOnlyLogin(req: Request, res: Response): Promise<void> {
@@ -62,11 +79,10 @@ async function ownerOnlyLogin(req: Request, res: Response): Promise<void> {
     });
     return;
   }
-  req.session.oauth = {
+  await startLoggedInSession(req, {
     accessToken: config.oauth.ownerAccessToken,
     tokenType: 'Bearer',
-  };
-  await loadProfile(req);
+  });
   res.redirect('/');
 }
 
@@ -122,14 +138,12 @@ authRouter.get('/callback', async (req, res, next) => {
     const accessToken = await client.getToken(tokenParams);
     const token = accessToken.token as any;
 
-    req.session.oauth = {
+    await startLoggedInSession(req, {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,
       expiresAt: token.expires_at,
       tokenType: token.token_type || 'Bearer',
-    };
-
-    await loadProfile(req);
+    });
 
     res.redirect('/');
   } catch (err) {

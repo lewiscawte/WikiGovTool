@@ -146,7 +146,10 @@ function renderProfile(message) {
   profileRow(dl, 'Headquarters', itemLinks(profile.headquarters));
   profileRow(dl, 'Replaces', itemLinks(profile.replaces));
   profileRow(dl, 'Replaced by', itemLinks(profile.replacedBy));
-  profileRow(dl, 'Website', profile.website && link(profile.website, profile.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')));
+  // Only http(s) becomes a link: the value is from Wikidata, and its URL type isn't the only
+  // thing that should stand between a page anyone can edit and an href.
+  const website = /^https?:\/\//i.test(profile.website || '') ? profile.website : null;
+  profileRow(dl, 'Website', website && link(website, website.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')));
   profileBody.appendChild(dl);
 }
 

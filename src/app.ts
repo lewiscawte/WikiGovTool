@@ -1,5 +1,4 @@
 import express, { NextFunction, Request, Response } from 'express';
-import cors from 'cors';
 import path from 'path';
 import session from 'express-session';
 import { config } from './config';
@@ -17,7 +16,8 @@ import { version } from './version';
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: true, credentials: true }));
+  // No CORS middleware: the frontend is served from this same origin, and allowing credentialed
+  // cross-origin requests would leave SameSite=Lax as the only guard on Wikidata edits.
   app.use(express.json());
   app.use(
     session({
