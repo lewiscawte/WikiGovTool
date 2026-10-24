@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Response, Router } from 'express';
 import crypto from 'crypto';
 import { AuthorizationCode } from 'simple-oauth2';
 import { config, userAgent } from '../config';
@@ -13,11 +13,69 @@ const client = new AuthorizationCode({
     tokenPath: '/w/rest.php/oauth2/access_token',
     authorizePath: '/w/rest.php/oauth2/authorize',
   },
+  // Send client_id/client_secret in the token request body, as Wikimedia's OAuth 2 docs do,
+  // rather than simple-oauth2's default HTTP Basic header.
+  options: {
+    authorizationMethod: 'body',
+  },
 });
 
 export const authRouter = Router();
 
-authRouter.get('/login', (req, res) => {
+// Stores the user's profile in the session, using the access token already in req.session.oauth.
+async function loadProfile(req: Request): Promise<void> {
+  const oauth = req.session.oauth!;
+  const profileResp = await fetch(config.oauth.profileUrl, {
+    headers: {
+      Authorization: `${oauth.tokenType} ${oauth.accessToken}`,
+      'User-Agent': userAgent(),
+    },
+  });
+
+  if (!profileResp.ok) {
+    throw new Error(`Profile fetch failed: ${profileResp.status}`);
+  }
+
+  const profile = (await profileResp.json()) as any;
+
+  req.session.user = {
+    username: profile.username || profile.sub || 'Unknown',
+    loggedInAt: new Date().toISOString(),
+    centralId: profile.sub,
+    email: profile.email,
+    rights: profile.rights,
+    groups: profile.groups,
+  };
+}
+
+// Owner-only consumer login (OAUTH_OWNER_ONLY=true): no redirect, the session just takes the
+// consumer's own access token. For local testing — see config.oauth.ownerOnly.
+async function ownerOnlyLogin(req: Request, res: Response): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(403).json({ error: 'Owner-only login is disabled in production' });
+    return;
+  }
+  if (!config.oauth.ownerAccessToken) {
+    res.status(500).json({
+      error: 'OAuth not configured',
+      detail: 'OAUTH_OWNER_ONLY is on: set OAUTH_OWNER_ACCESS_TOKEN to the owner-only consumer\'s access token',
+    });
+    return;
+  }
+  req.session.oauth = {
+    accessToken: config.oauth.ownerAccessToken,
+    tokenType: 'Bearer',
+  };
+  await loadProfile(req);
+  res.redirect('/');
+}
+
+authRouter.get('/login', (req, res, next) => {
+  if (config.oauth.ownerOnly) {
+    ownerOnlyLogin(req, res).catch(next);
+    return;
+  }
+
   if (!config.oauth.clientId || !config.oauth.clientSecret) {
     res.status(500).json({
       error: 'OAuth not configured',
@@ -29,10 +87,12 @@ authRouter.get('/login', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
 
+  // Omit scope entirely when unset (= the consumer's registered grants): simple-oauth2
+  // would otherwise send the literal string "undefined".
   const authorizationUri = client.authorizeURL({
     redirect_uri: config.oauth.callbackUrl,
-    scope: config.oauth.scope || undefined,
     state,
+    ...(config.oauth.scope ? { scope: config.oauth.scope } : {}),
   });
 
   res.redirect(authorizationUri);
@@ -69,27 +129,7 @@ authRouter.get('/callback', async (req, res, next) => {
       tokenType: token.token_type || 'Bearer',
     };
 
-    const profileResp = await fetch(config.oauth.profileUrl, {
-      headers: {
-        Authorization: `${req.session.oauth.tokenType} ${req.session.oauth.accessToken}`,
-        'User-Agent': userAgent(),
-      },
-    });
-
-    if (!profileResp.ok) {
-      throw new Error(`Profile fetch failed: ${profileResp.status}`);
-    }
-
-    const profile = (await profileResp.json()) as any;
-
-    req.session.user = {
-      username: profile.username || profile.sub || 'Unknown',
-      loggedInAt: new Date().toISOString(),
-      centralId: profile.sub,
-      email: profile.email,
-      rights: profile.rights,
-      groups: profile.groups,
-    };
+    await loadProfile(req);
 
     res.redirect('/');
   } catch (err) {

@@ -17,6 +17,11 @@ export const config = {
     tokenUrl: process.env.OAUTH_TOKEN_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/access_token',
     profileUrl: process.env.OAUTH_PROFILE_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/resource/profile',
     scope: process.env.OAUTH_SCOPE || '',
+    // Local testing only: log in with an owner-only consumer's access token instead of the
+    // OAuth redirect flow. Everyone who logs in becomes the token's owner, so it is refused
+    // when NODE_ENV=production. Off unless OAUTH_OWNER_ONLY=true.
+    ownerOnly: process.env.OAUTH_OWNER_ONLY === 'true',
+    ownerAccessToken: process.env.OAUTH_OWNER_ACCESS_TOKEN || '',
   },
 };
 
