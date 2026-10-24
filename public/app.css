@@ -486,3 +486,13 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
   .spinner { animation-duration: 3s; }
   .cabinet { transition: none; }
 }
+
+/* ---------- Footer ---------- */
+
+.site-footer {
+  max-width: var(--measure); margin: 0 auto;
+  padding: var(--gap-4) var(--gap-4) var(--gap-6);
+  border-top: 1px solid var(--rule-soft);
+  font-size: var(--t-xs); color: var(--ink-muted);
+}
+.site-footer a { color: inherit; font-family: ui-monospace, "SF Mono", Menlo, monospace; }

@@ -12,6 +12,7 @@ import { infoboxRouter } from './routes/infobox';
 import { authRouter } from './routes/auth';
 import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
+import { version } from './version';
 
 export function createApp() {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp() {
   );
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/version', (_req, res) => res.json(version));
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/api/positions', positionsRouter);
   app.use('/api/orgchart', orgchartRouter);

@@ -45,6 +45,26 @@ export async function api(path, opts) {
   return body;
 }
 
+const REPO_URL = 'https://github.com/lewiscawte/WikiGovTool';
+
+// The deployed commit in the footer, linked to GitHub, so a bug report can say which build.
+async function showVersion() {
+  const el = document.getElementById('versionInfo');
+  if (!el) return;
+  try {
+    const { commit, dirty } = await api('/api/version');
+    if (!commit) return;
+    const link = document.createElement('a');
+    link.href = `${REPO_URL}/commit/${commit}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = commit;
+    el.append(link);
+    if (dirty) el.append(' (with uncommitted changes)');
+  } catch { /* not worth surfacing */ }
+}
+showVersion();
+
 function isViewingToday() {
   return Number(slider.value) === dayIndexFor(new Date());
 }
