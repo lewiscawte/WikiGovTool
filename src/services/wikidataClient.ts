@@ -416,3 +416,94 @@ export async function fetchDepartmentOffices(departmentQids: string[]): Promise<
   departmentOfficesCache.set(cacheKey, result);
   return result;
 }
+
+export interface LinkedItem {
+  qid: string;
+  label: string;
+}
+
+export interface DepartmentProfile {
+  qid: string;
+  label: string;
+  description: string | null;
+  aliases: string[];
+  wikipediaTitle: string | null;
+  inception: string | null;
+  dissolved: string | null;
+  website: string | null;
+  instanceOf: LinkedItem[];
+  country: LinkedItem[];
+  parent: LinkedItem[];
+  headquarters: LinkedItem[];
+  headOffice: LinkedItem[];
+  replaces: LinkedItem[];
+  replacedBy: LinkedItem[];
+}
+
+const departmentProfileCache = new TtlCache<DepartmentProfile | null>(config.cacheTtlMs);
+
+// Everything the department dialog shows for one item. Linked items come back with their
+// labels (one row per value, so each property is a separate OPTIONAL and rows multiply —
+// fine for a single item).
+const PROFILE_LINKS: Record<string, keyof DepartmentProfile> = {
+  P31: 'instanceOf',
+  P17: 'country',
+  P749: 'parent',
+  P159: 'headquarters',
+  P2388: 'headOffice',
+  P1365: 'replaces',
+  P1366: 'replacedBy',
+};
+
+export async function fetchDepartmentProfile(qid: string): Promise<DepartmentProfile | null> {
+  if (!QID_RE.test(qid)) throw new Error('Invalid QID');
+  const cached = departmentProfileCache.get(qid);
+  if (cached !== undefined) return cached;
+
+  const [scalars, links] = await Promise.all([
+    runSparql(`SELECT (SAMPLE(?label) AS ?l) (SAMPLE(?desc) AS ?d) (SAMPLE(?title) AS ?article)
+       (MIN(?inception) AS ?founded) (MAX(?dissolved) AS ?abolished) (SAMPLE(?site) AS ?website)
+       (GROUP_CONCAT(DISTINCT ?alias; separator="\\u001f") AS ?aliases) WHERE {
+  BIND(wd:${qid} AS ?item)
+  OPTIONAL { ?item rdfs:label ?label . FILTER(LANG(?label) = "en") }
+  OPTIONAL { ?item schema:description ?desc . FILTER(LANG(?desc) = "en") }
+  OPTIONAL { ?item skos:altLabel ?alias . FILTER(LANG(?alias) = "en") }
+  OPTIONAL { ?item wdt:P571 ?inception . }
+  OPTIONAL { ?item wdt:P576 ?dissolved . }
+  OPTIONAL { ?item wdt:P856 ?site . }
+  OPTIONAL { ?a schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?title . }
+}`),
+    runSparql(`SELECT ?prop ?value ?valueLabel WHERE {
+  VALUES ?prop { ${Object.keys(PROFILE_LINKS).map((p) => `wdt:${p}`).join(' ')} }
+  wd:${qid} ?prop ?value .
+  FILTER(isIRI(?value) && STRSTARTS(STR(?value), "${ENTITY_URI_PREFIX}"))
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}`),
+  ]);
+
+  const s = scalars[0];
+  if (!s?.l && links.length === 0) {
+    departmentProfileCache.set(qid, null);
+    return null;
+  }
+  const profile: DepartmentProfile = {
+    qid,
+    label: s?.l?.value ?? qid,
+    description: s?.d?.value ?? null,
+    aliases: s?.aliases?.value ? s.aliases.value.split('\u001f') : [],
+    wikipediaTitle: s?.article?.value ?? null,
+    inception: s?.founded?.value ?? null,
+    dissolved: s?.abolished?.value ?? null,
+    website: s?.website?.value ?? null,
+    instanceOf: [], country: [], parent: [], headquarters: [], headOffice: [], replaces: [], replacedBy: [],
+  };
+  for (const b of links) {
+    const key = PROFILE_LINKS[b.prop.value.replace('http://www.wikidata.org/prop/direct/', '')];
+    const list = profile[key] as LinkedItem[] | undefined;
+    if (!list) continue;
+    const valueQid = toQid(b.value.value);
+    if (!list.some((i) => i.qid === valueQid)) list.push({ qid: valueQid, label: b.valueLabel?.value ?? valueQid });
+  }
+  departmentProfileCache.set(qid, profile);
+  return profile;
+}

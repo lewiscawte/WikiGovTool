@@ -4,7 +4,7 @@ import { UNITED_STATES_QID } from '../services/orgchart';
 import { requireAuth } from '../middleware/requireAuth';
 import { addExtraDepartment, setDepartmentOverride } from '../store/departmentStore';
 import { Department } from '../types';
-import { searchEntities } from '../services/wikidataClient';
+import { fetchDepartmentProfile, searchEntities } from '../services/wikidataClient';
 
 const QID_RE = /^Q[1-9]\d*$/;
 
@@ -42,6 +42,24 @@ departmentsRouter.get('/search', async (req, res, next) => {
     const results = await searchEntities(q);
     // Filter to likely departments (basic filtering)
     res.json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/departments/profile/Q123 — the Wikidata details shown in the department dialog.
+departmentsRouter.get('/profile/:qid', async (req, res, next) => {
+  try {
+    if (!QID_RE.test(req.params.qid)) {
+      res.status(400).json({ error: 'Invalid QID' });
+      return;
+    }
+    const profile = await fetchDepartmentProfile(req.params.qid);
+    if (!profile) {
+      res.status(404).json({ error: 'Entity not found' });
+      return;
+    }
+    res.json({ profile });
   } catch (err) {
     next(err);
   }

@@ -4,6 +4,7 @@ import {
   api, cabinetLabelFor, holderLine, initMasthead, leadCard, officeButton, officeholderImageEl, qidTag,
 } from './shared.js';
 import { openOfficeDialog } from './officeDialog.js';
+import { openAddDepartmentDialog, openEditDepartmentDialog } from './departmentDialog.js';
 
 const leadersEl = document.getElementById('leaders');
 const gridEl = document.getElementById('departmentGrid');
@@ -86,7 +87,7 @@ function departmentCard(dept) {
   editBtn.textContent = 'Edit';
   editBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    editDepartment(dept);
+    openEditDepartmentDialog(dept, { onSave: reload });
   });
   header.appendChild(name);
   header.appendChild(editBtn);
@@ -215,87 +216,8 @@ masthead.ready.catch((err) => {
   hintEl.className = 'status-line error';
 });
 
-async function searchDepartment(query) {
-  try {
-    const res = await api(`/api/departments/search?q=${encodeURIComponent(query)}`);
-    return res.results || [];
-  } catch {
-    return [];
-  }
-}
-
-async function addDepartment() {
-  const countryQid = currentCountryQid || 'Q30';
-  const query = prompt('Search for a department on Wikidata (or enter a name to add locally):');
-  if (!query || !query.trim()) return;
-  
-  const results = await searchDepartment(query.trim());
-  if (results.length > 0) {
-    const options = results.slice(0, 10).map((r, i) => `${i + 1}. ${r.label} (${r.id})`).join('\n');
-    const choice = prompt(`Select a department:\n${options}\n\nOr enter 0 to add as "${query.trim()}" locally:`);
-    if (choice === null) return;
-    const idx = parseInt(choice) - 1;
-    if (idx >= 0 && idx < results.length) {
-      const sel = results[idx];
-      try {
-        await api('/api/departments', {
-          method: 'POST',
-          body: JSON.stringify({
-            countryQid,
-            qid: sel.id,
-            label: sel.label,
-            wikipediaTitle: sel.description || '',
-          }),
-        });
-        hintEl.textContent = `Added department ${sel.label}.`;
-        hintEl.className = 'status-line';
-        reload();
-        return;
-      } catch (err) {
-        hintEl.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't add department: ${err.message}`;
-        hintEl.className = 'status-line error';
-        return;
-      }
-    }
-  }
-  
-  try {
-    await api('/api/departments', {
-      method: 'POST',
-      body: JSON.stringify({ countryQid, label: query.trim() }),
-    });
-    hintEl.textContent = `Added department ${query.trim()} locally.`;
-    hintEl.className = 'status-line';
-    reload();
-  } catch (err) {
-    hintEl.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't add department: ${err.message}`;
-    hintEl.className = 'status-line error';
-  }
-}
-
-async function editDepartment(dept) {
-  const newLabel = prompt('Department name:', dept.label);
-  if (newLabel === null) return;
-  const newWp = prompt('Wikipedia title (optional):', dept.wikipediaTitle || '');
-  if (newWp === null) return;
-  
-  try {
-    await api(`/api/departments/${dept.qid}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        label: newLabel.trim() || dept.label,
-        wikipediaTitle: newWp.trim(),
-      }),
-    });
-    hintEl.textContent = `Updated ${newLabel || dept.label}.`;
-    hintEl.className = 'status-line';
-    reload();
-  } catch (err) {
-    hintEl.textContent = err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't update department: ${err.message}`;
-    hintEl.className = 'status-line error';
-  }
-}
-
 if (addDepartmentBtn) {
-  addDepartmentBtn.addEventListener('click', addDepartment);
+  addDepartmentBtn.addEventListener('click', () => {
+    openAddDepartmentDialog({ onSave: reload });
+  });
 }
