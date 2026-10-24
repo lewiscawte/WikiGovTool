@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { fetchWikitext } from '../services/wikipediaClient';
+import { fetchArticle } from '../services/wikipediaClient';
 import { cleanWikitextValue, extractTemplate, parseTemplateFields } from '../services/infoboxParser';
 
 export const wikipediaRouter = Router();
@@ -61,9 +61,13 @@ function findMatchingTerm(block: string, officeTitle: string): Record<string, st
   return null;
 }
 
-async function pullInfobox(title: string, namePattern: RegExp, officeTitle?: string): Promise<{ fields: Record<string, string> } | { error: string }> {
-  const wikitext = await fetchWikitext(title);
-  if (!wikitext) return { error: `No Wikipedia page found for "${title}"` };
+type InfoboxResult = { fields: Record<string, string>; title: string; revid: number } | { error: string };
+
+async function pullInfobox(title: string, namePattern: RegExp, officeTitle?: string): Promise<InfoboxResult> {
+  const article = await fetchArticle(title);
+  if (!article) return { error: `No Wikipedia page found for "${title}"` };
+  const source = { title: article.title, revid: article.revid };
+  const wikitext = article.text;
   const block = extractTemplate(wikitext, namePattern);
   if (!block) return { error: `No matching infobox template found on "${title}"` };
   
@@ -77,13 +81,13 @@ async function pullInfobox(title: string, namePattern: RegExp, officeTitle?: str
       if (allFields.name) fields.name = cleanWikitextValue(allFields.name);
       if (allFields.party) fields.party = cleanWikitextValue(allFields.party);
       if (allFields.birth_date) fields.birth_date = cleanWikitextValue(allFields.birth_date);
-      return { fields };
+      return { fields, ...source };
     }
   }
   
   const raw = parseTemplateFields(block);
   const fields = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, cleanWikitextValue(v)]));
-  return { fields };
+  return { fields, ...source };
 }
 
 // "Pull from Wikipedia" (officeholder): fetches a person's page and extracts its
@@ -101,7 +105,7 @@ wikipediaRouter.get('/infobox', async (req, res, next) => {
       res.status(404).json({ error: result.error });
       return;
     }
-    res.json({ title, fields: result.fields });
+    res.json({ title: result.title, revid: result.revid, fields: result.fields });
   } catch (err) {
     next(err);
   }
@@ -125,7 +129,7 @@ wikipediaRouter.get('/office-infobox', async (req, res, next) => {
       res.status(404).json({ error: result.error });
       return;
     }
-    res.json({ title, fields: result.fields });
+    res.json({ title: result.title, revid: result.revid, fields: result.fields });
   } catch (err) {
     next(err);
   }

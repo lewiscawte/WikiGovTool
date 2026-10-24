@@ -8,6 +8,11 @@ import { wikimediaApiPost } from './wikimediaAuth';
 // and the save compute the same thing); applyTermPlan sends it.
 
 const GREGORIAN = 'http://www.wikidata.org/entity/Q1985727';
+// config.wikipediaApi is English Wikipedia; values copied from it are cited as imported
+// from Q328 (English Wikipedia) with the exact revision as the import URL, as is usual on Wikidata.
+const ENGLISH_WIKIPEDIA = 'Q328';
+const IMPORTED_FROM = 'P143';
+const IMPORT_URL = 'P4656';
 const DATE_INPUT_RE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/;
 
 export type TermProperty = 'P580' | 'P582';
@@ -74,6 +79,21 @@ export interface QualifierChange {
   value: TimeInput;
 }
 
+// The Wikipedia article revision a form value was copied from.
+export interface WikipediaSource {
+  title: string;
+  revid: number;
+}
+
+export interface PlannedReference extends WikipediaSource {
+  url: string;
+}
+
+export function importUrl(source: WikipediaSource): string {
+  const base = config.wikipediaApi.replace(/\/api\.php$/, '/index.php');
+  return `${base}?title=${encodeURIComponent(source.title.replace(/ /g, '_'))}&oldid=${source.revid}`;
+}
+
 export interface TermPlan {
   personQid: string;
   personLabel: string;
@@ -86,6 +106,8 @@ export interface TermPlan {
   // More than one candidate and none chosen: the user has to pick before anything is planned.
   needsChoice: boolean;
   changes: QualifierChange[];
+  // Wikipedia revisions to cite on the statement: one per distinct source of a changed value.
+  references: PlannedReference[];
 }
 
 // One qualifier's current state, as shown to the user.
@@ -108,6 +130,7 @@ export function planTermEdit(
   start: TimeInput | null,
   end: TimeInput | null,
   statementId?: string | null,
+  sources: Partial<Record<TermProperty, WikipediaSource | null>> = {},
 ): TermPlan {
   const claims: any[] = (entity.claims?.P39 ?? []).filter((c: any) => positionOf(c) === positionQid);
   const candidates: TermStatement[] = claims.map((c) => ({
@@ -125,6 +148,7 @@ export function planTermEdit(
     statementId: null,
     needsChoice: false,
     changes: [],
+    references: [],
   };
 
   let claim: any = null;
@@ -153,6 +177,19 @@ export function planTermEdit(
       value,
     });
   }
+
+  // Cite each Wikipedia revision a changed value came from, unless the statement already does.
+  const cited = new Set<string>(
+    (claim?.references ?? []).flatMap((r: any) => (r.snaks?.[IMPORT_URL] ?? []).map((sn: any) => sn.datavalue?.value)),
+  );
+  for (const change of plan.changes) {
+    const source = sources[change.property];
+    if (!source) continue;
+    const url = importUrl(source);
+    if (cited.has(url)) continue;
+    cited.add(url);
+    plan.references.push({ ...source, url });
+  }
   return plan;
 }
 
@@ -174,7 +211,8 @@ export interface AppliedEdit {
 // Sends a plan as a chain of edits, each based on the revision the previous one made, so an
 // edit by anyone else in between fails with an edit conflict instead of being overwritten.
 export async function applyTermPlan(req: Request, plan: TermPlan): Promise<AppliedEdit> {
-  const summary = `Set ${plan.changes.map((c) => c.label).join(' and ')} of position held ([[${plan.positionQid}]]) via WikiGovTool`;
+  const imported = plan.references.length ? ', imported from English Wikipedia' : '';
+  const summary = `Set ${plan.changes.map((c) => c.label).join(' and ')} of position held ([[${plan.positionQid}]])${imported} via WikiGovTool`;
   const revisions: number[] = [];
   let baserevid = plan.baseRevId;
 
@@ -213,6 +251,21 @@ export async function applyTermPlan(req: Request, plan: TermPlan): Promise<Appli
       snaktype: 'value',
       value: JSON.stringify(timeValue(change.value)),
       ...(change.snakhash ? { snakhash: change.snakhash } : {}),
+    });
+  }
+  for (const ref of plan.references) {
+    await post({
+      action: 'wbsetreference',
+      statement: statementId,
+      snaks: JSON.stringify({
+        [IMPORTED_FROM]: [{
+          snaktype: 'value',
+          property: IMPORTED_FROM,
+          datavalue: { type: 'wikibase-entityid', value: { 'entity-type': 'item', 'numeric-id': Number(ENGLISH_WIKIPEDIA.slice(1)) } },
+        }],
+        [IMPORT_URL]: [{ snaktype: 'value', property: IMPORT_URL, datavalue: { type: 'string', value: ref.url } }],
+      }),
+      'snaks-order': JSON.stringify([IMPORTED_FROM, IMPORT_URL]),
     });
   }
   return { statementId, revisions };

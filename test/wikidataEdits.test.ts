@@ -89,3 +89,27 @@ test('an "unknown value" qualifier is shown as such and replaced', () => {
   const plan = planTermEdit(person([claim]), 'Q2287650', null, parseDateInput('1953-01-20', 'e'));
   assert.deepEqual(plan.changes.map((c) => [c.from, c.snakhash]), [['unknown value', 'h-unk']]);
 });
+
+const chapmanRev = { title: 'Oscar L. Chapman', revid: 1234567 };
+const chapmanUrl = 'https://en.wikipedia.org/w/index.php?title=Oscar_L._Chapman&oldid=1234567';
+
+test('a changed value copied from Wikipedia is cited once, by exact revision', () => {
+  const plan = planTermEdit(person([p39('S1', 'Q2287650')]), 'Q2287650',
+    parseDateInput('1950-01-19', 's'), parseDateInput('1953-01-20', 'e'), null, { P580: chapmanRev, P582: chapmanRev });
+  assert.deepEqual(plan.references, [{ ...chapmanRev, url: chapmanUrl }]);
+});
+
+test('values typed by hand, or unchanged, are not cited', () => {
+  const claim = p39('S1', 'Q2287650', { P580: [timeSnak('h', '+1950-01-19T00:00:00Z', 11)] });
+  const unchanged = planTermEdit(person([claim]), 'Q2287650', parseDateInput('1950-01-19', 's'), parseDateInput('1953', 'e'), null, { P580: chapmanRev });
+  assert.deepEqual(unchanged.references, []);
+  const typed = planTermEdit(person([p39('S1', 'Q2287650')]), 'Q2287650', parseDateInput('1950', 's'), null);
+  assert.deepEqual(typed.references, []);
+});
+
+test('a revision the statement already cites is not cited again', () => {
+  const claim = { ...p39('S1', 'Q2287650'), references: [{ snaks: { P4656: [{ snaktype: 'value', datavalue: { type: 'string', value: chapmanUrl } }] } }] };
+  const plan = planTermEdit(person([claim]), 'Q2287650', parseDateInput('1950', 's'), null, null, { P580: chapmanRev });
+  assert.equal(plan.changes.length, 1);
+  assert.deepEqual(plan.references, []);
+});

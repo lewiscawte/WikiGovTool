@@ -151,6 +151,10 @@ const compareCells = Object.fromEntries(
 
 let currentPositionId = null;
 let currentEntry = null;
+// The officeholder's Wikipedia revision last compared against ({ title, revid }), and which
+// term dates were copied from it with ← ({ title, revid, value }) — cited when saved to Wikidata.
+let lastPulledArticle = null;
+const wikiSources = { start: null, end: null };
 // Called after something changes the underlying data (a saved link, an added office), so the
 // page can reload.
 let onDataChanged = () => {};
@@ -185,6 +189,9 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
   const { position, officeholder } = entry;
   currentPositionId = position.id;
   currentEntry = entry;
+  lastPulledArticle = null;
+  wikiSources.start = null;
+  wikiSources.end = null;
   hideReview();
   onDataChanged = onChange || (() => {});
   dialogTitle.textContent = officeTitle(position.title);
@@ -371,6 +378,7 @@ document.querySelectorAll('.copy-btn').forEach((btn) => {
     const cell = compareCells[key];
     cell.input.value = cell.wiki.textContent;
     cell.wiki.classList.remove('mismatch');
+    if (key in wikiSources && lastPulledArticle) wikiSources[key] = { ...lastPulledArticle, value: cell.input.value };
     refreshInfobox();
   });
 });
@@ -387,7 +395,8 @@ document.getElementById('pullBtn').addEventListener('click', async () => {
   setStatus(dialogStatus, `Reading the infobox on "${title}"…`);
   try {
     const url = `/api/wikipedia/infobox?title=${encodeURIComponent(title)}${office ? `&office=${encodeURIComponent(office)}` : ''}`;
-    const { fields } = await api(url);
+    const { fields, title: articleTitle, revid } = await api(url);
+    lastPulledArticle = revid ? { title: articleTitle, revid } : null;
     fillCompareCell('name', fields.name || '');
     fillCompareCell('party', fields.party || '');
     fillCompareCell('start', fields.term_start || '');
@@ -453,6 +462,17 @@ function termDateForWikidata(text) {
   return null;
 }
 
+for (const key of Object.keys(wikiSources)) {
+  dialogFields[key].addEventListener('input', () => {
+    if (wikiSources[key] && dialogFields[key].value !== wikiSources[key].value) wikiSources[key] = null;
+  });
+}
+
+const sourceFor = (key) => {
+  const src = wikiSources[key];
+  return src && dialogFields[key].value === src.value ? { title: src.title, revid: src.revid } : null;
+};
+
 const reviewEl = document.getElementById('editReview');
 const reviewBody = document.getElementById('editReviewBody');
 const publishBtn = document.getElementById('editReviewPublish');
@@ -482,7 +502,8 @@ function termRequest(statementId = null) {
   const end = termDateForWikidata(dialogFields.end.value);
   if (start === null) throw new Error(`Can't read "${dialogFields.start.value}" as a date. Use YYYY-MM-DD.`);
   if (end === null) throw new Error(`Can't read "${dialogFields.end.value}" as a date. Use YYYY-MM-DD.`);
-  return { personQid, positionQid: position.wikidataQid, start, end, statementId };
+  const sources = { start: start ? sourceFor('start') : null, end: end ? sourceFor('end') : null };
+  return { personQid, positionQid: position.wikidataQid, start, end, statementId, sources };
 }
 
 function renderReview({ plan, username, tags }, request) {
@@ -531,6 +552,17 @@ function renderReview({ plan, username, tags }, request) {
     const to = document.createElement('ins');
     to.textContent = c.to;
     li.appendChild(to);
+    changes.appendChild(li);
+  });
+  plan.references.forEach((r) => {
+    const li = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = r.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.className = 'voice-wp';
+    link.textContent = r.title;
+    li.append('Add reference: imported from English Wikipedia, revision ', String(r.revid), ' of ', link);
     changes.appendChild(li);
   });
   const nothing = plan.statementId && plan.changes.length === 0;

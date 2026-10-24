@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { fetchEntityForEdit, getEntity, invalidateOfficeholderHistory, searchEntities } from '../services/wikidataClient';
-import { applyTermPlan, EditInputError, parseDateInput, planTermEdit, TermPlan, WikidataApiError } from '../services/wikidataEdits';
+import {
+  applyTermPlan, EditInputError, parseDateInput, planTermEdit, TermPlan, TermProperty, WikidataApiError, WikipediaSource,
+} from '../services/wikidataEdits';
+import { fetchRevisionTitle } from '../services/wikipediaClient';
 import { requireAuth } from '../middleware/requireAuth';
 import { wikimediaApiPost } from '../services/wikimediaAuth';
 import { config } from '../config';
@@ -66,11 +69,27 @@ wikidataRouter.post('/save', requireAuth, async (req, res, next) => {
   }
 });
 
+// A form value's claimed Wikipedia source, checked against Wikipedia before it's cited:
+// the revision has to exist and belong to the named article.
+async function verifiedSource(raw: any, field: string): Promise<WikipediaSource | null> {
+  if (raw == null) return null;
+  const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+  const revid = Number(raw.revid);
+  if (!title || !Number.isInteger(revid) || revid <= 0) throw new EditInputError(`Invalid Wikipedia source for ${field}`);
+  const actual = await fetchRevisionTitle(revid);
+  if (!actual || actual.replace(/_/g, ' ') !== title.replace(/_/g, ' ')) {
+    throw new EditInputError(`Wikipedia revision ${revid} isn't a revision of "${title}"`);
+  }
+  return { title: actual, revid };
+}
+
 // Officeholder term dates: start/end time qualifiers on the person's position held statement.
-// Both endpoints take { personQid, positionQid, start, end, statementId? }; dates are
+// Both endpoints take { personQid, positionQid, start, end, statementId?, sources? }; dates are
 // "YYYY", "YYYY-MM" or "YYYY-MM-DD", and an empty date leaves Wikidata's value alone.
+// sources.start / sources.end ({ title, revid }) mark a date as copied from that Wikipedia
+// revision, which is then cited on the statement.
 async function planFromBody(body: any): Promise<TermPlan> {
-  const { personQid, positionQid, start, end, statementId } = body ?? {};
+  const { personQid, positionQid, start, end, statementId, sources } = body ?? {};
   if (typeof personQid !== 'string' || !QID_RE.test(personQid)) throw new EditInputError('No officeholder Wikidata item to edit');
   if (typeof positionQid !== 'string' || !QID_RE.test(positionQid)) throw new EditInputError('This office has no Wikidata item');
   const startValue = parseDateInput(start, 'Took office');
@@ -78,9 +97,13 @@ async function planFromBody(body: any): Promise<TermPlan> {
   if (!startValue && !endValue) throw new EditInputError('Enter a took office or left office date to save');
   if (startValue && endValue && startValue.time > endValue.time) throw new EditInputError('Left office is before took office');
   if (statementId != null && typeof statementId !== 'string') throw new EditInputError('Invalid statement id');
+  const verified: Partial<Record<TermProperty, WikipediaSource | null>> = {
+    P580: startValue ? await verifiedSource(sources?.start, 'took office') : null,
+    P582: endValue ? await verifiedSource(sources?.end, 'left office') : null,
+  };
   const entity = await fetchEntityForEdit(personQid);
   if (!entity) throw new EditInputError(`${personQid} wasn't found on Wikidata`);
-  return planTermEdit(entity, positionQid, startValue, endValue, statementId || null);
+  return planTermEdit(entity, positionQid, startValue, endValue, statementId || null, verified);
 }
 
 // What a save would change, for the user to confirm.
