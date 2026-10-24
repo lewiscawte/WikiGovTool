@@ -2,6 +2,7 @@
   "name": "WikiGovTool",
   "version": "1.0.0",
   "description": "Backend for a government organization chart tool, backed live by Wikidata and Wikipedia.",
+  "license": "GPL-3.0-or-later",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
