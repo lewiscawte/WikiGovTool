@@ -15,7 +15,9 @@ export const config = {
     authBase: process.env.OAUTH_AUTH_BASE || 'https://meta.wikimedia.org',
     authorizeUrl: process.env.OAUTH_AUTHORIZE_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/authorize',
     tokenUrl: process.env.OAUTH_TOKEN_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/access_token',
-    profileUrl: process.env.OAUTH_PROFILE_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/resource/profile',
+    // Wikidata rather than meta: a consumer restricted to wikidatawiki (the only wiki this tool
+    // edits) has tokens meta rejects with 403, and this endpoint also works for "*" consumers.
+    profileUrl: process.env.OAUTH_PROFILE_URL || 'https://www.wikidata.org/w/rest.php/oauth2/resource/profile',
     scope: process.env.OAUTH_SCOPE || '',
     // Local testing only: log in with an owner-only consumer's access token instead of the
     // OAuth redirect flow. Everyone who logs in becomes the token's owner, so it is refused
