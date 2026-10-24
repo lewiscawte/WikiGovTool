@@ -11,6 +11,7 @@ import { wikipediaRouter } from './routes/wikipedia';
 import { infoboxRouter } from './routes/infobox';
 import { authRouter } from './routes/auth';
 import { countriesRouter } from './routes/countries';
+import { officeholdersRouter } from './routes/officeholders';
 
 export function createApp() {
   const app = express();
@@ -36,6 +37,7 @@ export function createApp() {
   app.use('/api/infobox', infoboxRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/countries', countriesRouter);
+  app.use('/api/officeholders', officeholdersRouter);
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({ error: `No route for ${req.method} ${req.path}` });

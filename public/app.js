@@ -4,6 +4,7 @@ import {
   officeholderImageEl, qidTag, state, US_QID,
 } from './shared.js';
 import { openAddOfficeDialog, openOfficeDialog } from './officeDialog.js';
+import { openAddOfficeholderDialog } from './officeholderDialog.js';
 
 const heroEl = document.getElementById('hero');
 const gridEl = document.getElementById('deptGrid');
@@ -25,15 +26,16 @@ function headOfGovernment(currentEntries) {
 }
 
 const open = (entry) => openOfficeDialog(entry, { onChange: reload });
+const addHolder = (entry) => openAddOfficeholderDialog(entry, { onSave: reload });
 
 function renderHero(currentEntries) {
   heroEl.innerHTML = '';
   if (state.countryQid === US_QID) {
-    heroEl.append(leadCard(currentEntries.find((e) => e.position.id === 'president'), 'President', open));
+    heroEl.append(leadCard(currentEntries.find((e) => e.position.id === 'president'), 'President', open, addHolder));
   } else {
     heroEl.append(
-      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of State'), 'Head of State', open),
-      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of Government'), 'Head of Government', open),
+      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of State'), 'Head of State', open, addHolder),
+      leadCard(currentEntries.find((e) => e.position.bucket === 'Head of Government'), 'Head of Government', open, addHolder),
     );
   }
 }
@@ -57,7 +59,7 @@ function officeRow(entry) {
   dept.className = 'office-dept';
   dept.textContent = position.department;
 
-  row.append(officeholderImageEl(officeholder, 96, 'portrait portrait-sm'), title, linkState, dept, holderLine('office-holder', officeholder));
+  row.append(officeholderImageEl(officeholder, 96, 'portrait portrait-sm'), title, linkState, dept, holderLine('office-holder', officeholder, () => addHolder(entry)));
   const dd = deputiesDropdown(entry.deputies);
   if (dd) row.appendChild(dd);
   return row;

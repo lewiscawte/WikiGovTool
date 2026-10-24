@@ -1,5 +1,6 @@
 import { listPositions } from '../store/positionStore';
 import { listExtraPositions } from '../store/extraPositionsStore';
+import { localOfficeholderOn } from '../store/officeholderStore';
 import {
   fetchCabinetPositions,
   fetchDeputyPairs,
@@ -150,11 +151,31 @@ export function existedOn(position: { inception: string | null; dissolved: strin
   return true;
 }
 
+// Only used when Wikidata has no holder for the date: a locally-picked officeholder, if any.
+function localEntry(position: OrgChartPosition, date: Date): OrgChartEntry {
+  const local = localOfficeholderOn(position.wikidataQid ?? position.id, date);
+  if (!local) return { position, officeholder: null, deputies: [] };
+  return {
+    position,
+    officeholder: {
+      personName: local.personName,
+      personWikidataQid: local.personQid,
+      partyLabel: null,
+      startDate: local.startDate,
+      endDate: local.endDate,
+      termOrdinal: 1,
+      imageUrl: local.imageUrl,
+      local: true,
+    },
+    deputies: [],
+  };
+}
+
 export function buildEntry(position: OrgChartPosition, history: PositionHistoryRow[], date: Date): OrgChartEntry {
-  if (!position.wikidataQid) return { position, officeholder: null, deputies: [] };
+  if (!position.wikidataQid) return localEntry(position, date);
   const dated = datedRowsForPosition(history, position.wikidataQid);
   const term = pickTermForDate(dated, date);
-  if (!term) return { position, officeholder: null, deputies: [] };
+  if (!term) return localEntry(position, date);
   return {
     position,
     officeholder: {

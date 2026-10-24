@@ -41,6 +41,9 @@ export interface OfficeholderTerm {
   // Wikidata P18 ("image") as a Commons Special:FilePath URL — append `?width=<n>` for a
   // sized thumbnail. Null when the person has no P18 claim.
   imageUrl: string | null;
+  // True for a holder a user picked locally because Wikidata records none for this date
+  // (see store/officeholderStore.ts) — shown as such, since it's a gap on Wikidata.
+  local?: boolean;
 }
 
 export interface OrgChartEntry {

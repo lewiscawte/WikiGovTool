@@ -5,6 +5,7 @@ import {
 } from './shared.js';
 import { openOfficeDialog } from './officeDialog.js';
 import { openAddDepartmentDialog, openEditDepartmentDialog } from './departmentDialog.js';
+import { openAddOfficeholderDialog } from './officeholderDialog.js';
 
 const leadersEl = document.getElementById('leaders');
 const gridEl = document.getElementById('departmentGrid');
@@ -24,6 +25,7 @@ let lastLoad = null;
 let currentCountryQid = null;
 
 const open = (entry) => openOfficeDialog(entry, { onChange: reload });
+const addHolder = (entry) => openAddOfficeholderDialog(entry, { onSave: reload });
 const year = (iso) => (iso ? iso.slice(0, 4) : null);
 
 function lifespanText(dept) {
@@ -44,7 +46,7 @@ function headBlock(entry) {
   title.appendChild(officeButton(entry, open));
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
-  text.append(title, holderLine('department-head-holder', entry.officeholder));
+  text.append(title, holderLine('department-head-holder', entry.officeholder, () => addHolder(entry)));
   block.append(officeholderImageEl(entry.officeholder, 112, 'portrait portrait-md'), text);
   return block;
 }
@@ -57,7 +59,7 @@ function officeItem(entry) {
   title.appendChild(officeButton(entry, open));
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
-  item.append(title, holderLine('department-office-holder', entry.officeholder));
+  item.append(title, holderLine('department-office-holder', entry.officeholder, () => addHolder(entry)));
   return item;
 }
 
@@ -141,7 +143,7 @@ function unassignedRow(entry) {
   title.appendChild(officeButton(entry, open));
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
-  row.append(officeholderImageEl(entry.officeholder, 96, 'portrait portrait-sm'), title, holderLine('office-holder', entry.officeholder));
+  row.append(officeholderImageEl(entry.officeholder, 96, 'portrait portrait-sm'), title, holderLine('office-holder', entry.officeholder, () => addHolder(entry)));
   return row;
 }
 
@@ -149,7 +151,7 @@ function render() {
   if (!view) return;
 
   leadersEl.innerHTML = '';
-  view.leaders.forEach((entry) => leadersEl.appendChild(leadCard(entry, entry.position.title, open)));
+  view.leaders.forEach((entry) => leadersEl.appendChild(leadCard(entry, entry.position.title, open, addHolder)));
 
   const populated = view.departments.filter((d) => d.heads.length || d.offices.length || d.vacant.length);
   const empty = view.departments.filter((d) => !populated.includes(d));

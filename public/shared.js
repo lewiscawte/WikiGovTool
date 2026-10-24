@@ -117,12 +117,21 @@ export function officeholderImageEl(officeholder, width, className) {
 }
 
 // "Keir Starmer, since 2024-07-05" — name and tenure as one line, tenure muted.
-export function holderLine(className, officeholder) {
+// `onAdd`, if given, puts an "Add officeholder" button on an empty line.
+export function holderLine(className, officeholder, onAdd) {
   const line = document.createElement('p');
   line.className = className;
   if (!officeholder?.personName) {
     line.classList.add('office-empty');
     line.textContent = 'No officeholder recorded for this date';
+    if (onAdd) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'add-holder';
+      add.textContent = 'Add officeholder';
+      add.addEventListener('click', onAdd);
+      line.appendChild(add);
+    }
     return line;
   }
   line.append(document.createTextNode(displayName(officeholder.personName)));
@@ -132,6 +141,12 @@ export function holderLine(className, officeholder) {
   tenure.className = 'tenure';
   tenure.textContent = tenureLabel(officeholder);
   line.appendChild(tenure);
+  if (officeholder.local) {
+    const local = document.createElement('span');
+    local.className = 'holder-local';
+    local.textContent = 'Added locally, not on Wikidata';
+    line.appendChild(local);
+  }
   return line;
 }
 
@@ -173,7 +188,7 @@ export function deputiesDropdown(deputies) {
 
 // Office-first: the position title is the prominent heading, the officeholder is
 // supporting detail.
-export function leadCard(entry, fallbackTitle, onOpen) {
+export function leadCard(entry, fallbackTitle, onOpen, onAddHolder) {
   const card = document.createElement('article');
   card.className = 'lead';
   const photo = officeholderImageEl(entry?.officeholder, 200, 'portrait');
@@ -184,7 +199,8 @@ export function leadCard(entry, fallbackTitle, onOpen) {
   else officeEl.append(document.createTextNode(entry?.position.title || fallbackTitle));
   const officeQidTag = qidTag(entry?.position.wikidataQid);
   if (officeQidTag) officeEl.appendChild(officeQidTag);
-  text.append(officeEl, holderLine('lead-holder', entry?.officeholder));
+  const onAdd = entry && onAddHolder ? () => onAddHolder(entry) : null;
+  text.append(officeEl, holderLine('lead-holder', entry?.officeholder, onAdd));
   const dd = deputiesDropdown(entry?.deputies);
   if (dd) text.appendChild(dd);
   card.append(photo, text);

@@ -507,3 +507,56 @@ export async function fetchDepartmentProfile(qid: string): Promise<DepartmentPro
   departmentProfileCache.set(qid, profile);
   return profile;
 }
+
+export interface PersonCandidate {
+  qid: string;
+  name: string;
+  description: string | null;
+  birth: string | null;
+  death: string | null;
+  wikipediaTitle: string | null;
+  imageUrl: string | null;
+  // Wikidata already records this person holding the office being filled (any P39 statement).
+  heldPosition: boolean;
+}
+
+// Of `qids`, the ones that are people (P31 Q5 — instance of human, not a subclass, which is
+// how Wikidata models people), with what the officeholder picker shows for each. Order of
+// the result follows `qids`.
+export async function fetchPeople(qids: string[], positionQid: string | null): Promise<PersonCandidate[]> {
+  const validQids = [...new Set(qids.filter((q) => QID_RE.test(q)))];
+  if (validQids.length === 0) return [];
+  const heldBind = positionQid && QID_RE.test(positionQid)
+    ? `BIND(EXISTS { ?person wdt:P39 wd:${positionQid} . } AS ?held)`
+    : 'BIND(false AS ?held)';
+  const bindings = await runSparql(`SELECT ?person (SAMPLE(?label) AS ?name) (SAMPLE(?desc) AS ?description)
+       (MIN(?born) AS ?birth) (MAX(?died) AS ?death) (SAMPLE(?title) AS ?article) (SAMPLE(?img) AS ?image)
+       (SAMPLE(?held) AS ?heldPosition) WHERE {
+  VALUES ?person { ${valuesList(validQids)} }
+  ?person wdt:P31 wd:Q5 .
+  OPTIONAL { ?person rdfs:label ?label . FILTER(LANG(?label) = "en") }
+  OPTIONAL { ?person schema:description ?desc . FILTER(LANG(?desc) = "en") }
+  OPTIONAL { ?person wdt:P569 ?born . FILTER(isLiteral(?born)) }
+  OPTIONAL { ?person wdt:P570 ?died . FILTER(isLiteral(?died)) }
+  OPTIONAL { ?person wdt:P18 ?img . }
+  OPTIONAL { ?a schema:about ?person ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?title . }
+  ${heldBind}
+} GROUP BY ?person`);
+
+  const byQid = new Map<string, PersonCandidate>();
+  for (const b of bindings) {
+    const qid = toQid(b.person.value);
+    byQid.set(qid, {
+      qid,
+      name: b.name?.value ?? qid,
+      description: b.description?.value ?? null,
+      // "Unknown value" dates (skolem URIs, see dateValue) are filtered out in the query.
+      birth: dateValue(b.birth),
+      death: dateValue(b.death),
+      wikipediaTitle: b.article?.value ?? null,
+      imageUrl: b.image?.value ?? null,
+      heldPosition: b.heldPosition?.value === 'true',
+    });
+  }
+  return validQids.map((q) => byQid.get(q)).filter((p): p is PersonCandidate => !!p);
+}
