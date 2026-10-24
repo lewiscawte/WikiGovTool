@@ -84,7 +84,6 @@ function departmentCard(dept) {
   editBtn.type = 'button';
   editBtn.className = 'btn';
   editBtn.textContent = 'Edit';
-  editBtn.style.marginLeft = 'auto';
   editBtn.addEventListener('click', (e) => {
     e.preventDefault();
     editDepartment(dept);
