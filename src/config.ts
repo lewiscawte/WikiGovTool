@@ -7,6 +7,9 @@ export const config = {
   wikidataSparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT || 'https://query.wikidata.org/sparql',
   wikidataApi: process.env.WIKIDATA_API || 'https://www.wikidata.org/w/api.php',
   wikipediaApi: process.env.WIKIPEDIA_API || 'https://en.wikipedia.org/w/api.php',
+  // Change tags applied to every edit this tool makes on Wikidata (comma-separated). Each must
+  // already exist and be active on Wikidata (Special:Tags), or the edit is rejected; empty = none.
+  wikidataEditTags: process.env.WIKIDATA_EDIT_TAGS || '',
   cacheTtlMs: Number(process.env.CACHE_TTL_MS) || 15 * 60 * 1000,
   oauth: {
     clientId: process.env.OAUTH_CLIENT_ID || '',

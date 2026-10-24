@@ -93,6 +93,15 @@ document.body.insertAdjacentHTML('beforeend', `
         <pre id="infobox"></pre>
       </details>
 
+      <section class="edit-review" id="editReview" hidden aria-labelledby="editReviewTitle">
+        <h3 class="edit-review-title" id="editReviewTitle">Review edit to Wikidata</h3>
+        <div id="editReviewBody"></div>
+        <div class="edit-review-actions">
+          <button type="button" class="btn" id="editReviewCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="editReviewPublish">Publish to Wikidata</button>
+        </div>
+      </section>
+
       <div class="dialog-actions">
         <button type="button" class="btn" id="linkBtn">Save link locally</button>
         <button type="button" class="btn" id="cancelBtn">Close</button>
@@ -141,6 +150,7 @@ const compareCells = Object.fromEntries(
 );
 
 let currentPositionId = null;
+let currentEntry = null;
 // Called after something changes the underlying data (a saved link, an added office), so the
 // page can reload.
 let onDataChanged = () => {};
@@ -174,6 +184,8 @@ Object.values(dialogFields).forEach((input) => input.addEventListener('input', (
 export async function openOfficeDialog(entry, { onChange } = {}) {
   const { position, officeholder } = entry;
   currentPositionId = position.id;
+  currentEntry = entry;
+  hideReview();
   onDataChanged = onChange || (() => {});
   dialogTitle.textContent = officeTitle(position.title);
   setStatus(dialogStatus, '');
@@ -222,6 +234,7 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
 function closeDialog() {
   backdrop.classList.remove('open');
   currentPositionId = null;
+  currentEntry = null;
 }
 
 document.getElementById('cancelBtn').addEventListener('click', closeDialog);
@@ -278,8 +291,9 @@ const EMPTY_PLACEHOLDERS = new Set(['', 'unknown', 'still exists', 'incumbent'])
 
 const MONTHS = {
   january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
-  july: '07', august: '08', september: '09', oct: '10', october: '10',
-  nov: '11', november: '11', dec: '12', december: '12',
+  july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+  jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08',
+  sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
 };
 
 function normalizeDateForCompare(s) {
@@ -420,10 +434,171 @@ linkBtn.addEventListener('click', async () => {
   }
 });
 
-document.getElementById('saveBtn').addEventListener('click', async () => {
+// Term dates as Wikidata takes them: "YYYY", "YYYY-MM" or "YYYY-MM-DD" at the precision the
+// text actually gives (so "March 1950" never becomes 1950-03-01). '' for blank; null if unreadable.
+function termDateForWikidata(text) {
+  const cleaned = (text || '').replace(/<[^>]+>/g, '').replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1').replace(/\[\[([^\]]+)\]\]/g, '$1').trim();
+  if (!cleaned) return '';
+  if (/^\d{4}(-\d{2}(-\d{2})?)?$/.test(cleaned)) return cleaned;
+  const pad = (n) => String(n).padStart(2, '0');
+  let m = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/);
+  if (m && MONTHS[m[2].toLowerCase()]) return `${m[3]}-${MONTHS[m[2].toLowerCase()]}-${pad(m[1])}`;
+  m = cleaned.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (m && MONTHS[m[1].toLowerCase()]) return `${m[3]}-${MONTHS[m[1].toLowerCase()]}-${pad(m[2])}`;
+  m = cleaned.match(/^([A-Za-z]+)\.?\s+(\d{4})$/);
+  if (m && MONTHS[m[1].toLowerCase()]) return `${m[2]}-${MONTHS[m[1].toLowerCase()]}`;
+  // Infobox templates such as {{start date|1950|1|19}}: only trust a full year|month|day.
+  m = cleaned.match(/\{\{[^{}|]+\|\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})\s*[|}]/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  return null;
+}
+
+const reviewEl = document.getElementById('editReview');
+const reviewBody = document.getElementById('editReviewBody');
+const publishBtn = document.getElementById('editReviewPublish');
+const wikidataLink = (qid, text = qid) => {
+  const a = document.createElement('a');
+  a.href = `https://www.wikidata.org/wiki/${qid}`;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = text;
+  return a;
+};
+// The request being reviewed; Publish sends exactly this, plus the revision it was planned against.
+let pendingEdit = null;
+
+function hideReview() {
+  reviewEl.hidden = true;
+  reviewBody.innerHTML = '';
+  pendingEdit = null;
+}
+
+function termRequest(statementId = null) {
+  const position = currentEntry?.position;
+  const personQid = currentEntry?.officeholder?.personWikidataQid;
+  if (!position?.wikidataQid) throw new Error('This office has no Wikidata item to save to.');
+  if (!personQid) throw new Error('There is no officeholder to save. Use "Add officeholder" to pick one first.');
+  const start = termDateForWikidata(dialogFields.start.value);
+  const end = termDateForWikidata(dialogFields.end.value);
+  if (start === null) throw new Error(`Can't read "${dialogFields.start.value}" as a date. Use YYYY-MM-DD.`);
+  if (end === null) throw new Error(`Can't read "${dialogFields.end.value}" as a date. Use YYYY-MM-DD.`);
+  return { personQid, positionQid: position.wikidataQid, start, end, statementId };
+}
+
+function renderReview({ plan, username, tags }, request) {
+  reviewBody.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.append(`As ${username}, on `, wikidataLink(plan.personQid, `${plan.personLabel} (${plan.personQid})`), ':');
+  reviewBody.appendChild(intro);
+
+  if (plan.needsChoice) {
+    const ask = document.createElement('p');
+    ask.textContent = `${plan.personLabel} has ${plan.candidates.length} "position held" statements for this office. Which term is this?`;
+    const list = document.createElement('ul');
+    list.className = 'edit-review-choices';
+    plan.candidates.forEach((c) => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn';
+      btn.textContent = `${c.start ?? 'no start'} – ${c.end ?? 'no end'}${c.rank === 'normal' ? '' : ` (${c.rank} rank)`}`;
+      btn.addEventListener('click', () => previewEdit(c.id));
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    reviewBody.append(ask, list);
+    publishBtn.hidden = true;
+    reviewEl.hidden = false;
+    return;
+  }
+
+  const changes = document.createElement('ul');
+  changes.className = 'edit-review-changes';
+  if (!plan.statementId) {
+    const li = document.createElement('li');
+    li.append('Add a new "position held" statement: ', wikidataLink(plan.positionQid, `${officeTitle(currentEntry.position.title)} (${plan.positionQid})`));
+    changes.appendChild(li);
+  }
+  plan.changes.forEach((c) => {
+    const li = document.createElement('li');
+    const verb = c.from ? 'Change' : 'Add';
+    li.append(`${verb} ${c.label} (${c.property}): `);
+    if (c.from) {
+      const from = document.createElement('del');
+      from.textContent = c.from;
+      li.append(from, ' → ');
+    }
+    const to = document.createElement('ins');
+    to.textContent = c.to;
+    li.appendChild(to);
+    changes.appendChild(li);
+  });
+  const nothing = plan.statementId && plan.changes.length === 0;
+  if (nothing) {
+    const p = document.createElement('p');
+    p.textContent = 'Wikidata already has these dates. Nothing to change.';
+    reviewBody.appendChild(p);
+  } else {
+    reviewBody.appendChild(changes);
+  }
+
+  const note = document.createElement('p');
+  note.className = 'edit-review-note';
+  note.textContent = `Only the term dates are saved; name, party and the office fields are not. `
+    + (tags ? `Tagged: ${tags}.` : 'No edit tag is configured.');
+  reviewBody.appendChild(note);
+
+  pendingEdit = nothing ? null : { ...request, statementId: plan.statementId, baseRevId: plan.baseRevId };
+  publishBtn.hidden = nothing;
+  publishBtn.disabled = false;
+  reviewEl.hidden = false;
+}
+
+async function previewEdit(statementId = null) {
+  let request;
   try {
-    await api('/api/wikidata/save', { method: 'POST', body: JSON.stringify({}) });
+    request = termRequest(statementId);
   } catch (err) {
-    setStatus(dialogStatus, err.status === 401 ? 'Log in with Wikimedia first.' : (err.body?.detail || err.message), true);
+    setStatus(dialogStatus, err.message, true);
+    return;
+  }
+  setStatus(dialogStatus, 'Checking Wikidata…');
+  try {
+    const preview = await api('/api/wikidata/term/preview', { method: 'POST', body: JSON.stringify(request) });
+    if (currentEntry?.officeholder?.personWikidataQid !== request.personQid) return;
+    setStatus(dialogStatus, '');
+    renderReview(preview, request);
+  } catch (err) {
+    setStatus(dialogStatus, err.status === 401 ? 'Log in with Wikimedia first.' : err.message, true);
+  }
+}
+
+document.getElementById('saveBtn').addEventListener('click', () => previewEdit());
+document.getElementById('editReviewCancel').addEventListener('click', hideReview);
+
+publishBtn.addEventListener('click', async () => {
+  if (!pendingEdit) return;
+  publishBtn.disabled = true;
+  setStatus(dialogStatus, 'Publishing to Wikidata…');
+  try {
+    const { revisions } = await api('/api/wikidata/term/save', { method: 'POST', body: JSON.stringify(pendingEdit) });
+    hideReview();
+    dialogStatus.className = 'status-line';
+    dialogStatus.textContent = 'Saved to Wikidata. ';
+    const last = revisions[revisions.length - 1];
+    if (last) {
+      const diff = document.createElement('a');
+      diff.href = `https://www.wikidata.org/w/index.php?diff=${last}`;
+      diff.target = '_blank';
+      diff.rel = 'noopener';
+      diff.textContent = revisions.length === 1 ? 'View the edit' : `View the last of ${revisions.length} edits`;
+      dialogStatus.append(diff, '. ');
+    }
+    dialogStatus.append("Wikidata's query service can take a few minutes to show it here.");
+    await onDataChanged();
+  } catch (err) {
+    publishBtn.disabled = false;
+    const partial = err.body?.revisions?.length ? ` ${err.body.revisions.length} edit(s) went through before this; check the item's history.` : '';
+    setStatus(dialogStatus, (err.status === 401 ? 'Log in with Wikimedia first.' : err.message) + partial, true);
   }
 });

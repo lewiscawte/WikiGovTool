@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { getEntity, searchEntities } from '../services/wikidataClient';
+import { fetchEntityForEdit, getEntity, invalidateOfficeholderHistory, searchEntities } from '../services/wikidataClient';
+import { applyTermPlan, EditInputError, parseDateInput, planTermEdit, TermPlan, WikidataApiError } from '../services/wikidataEdits';
 import { requireAuth } from '../middleware/requireAuth';
 import { wikimediaApiPost } from '../services/wikimediaAuth';
 import { config } from '../config';
@@ -62,5 +63,55 @@ wikidataRouter.post('/save', requireAuth, async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
+  }
+});
+
+// Officeholder term dates: start/end time qualifiers on the person's position held statement.
+// Both endpoints take { personQid, positionQid, start, end, statementId? }; dates are
+// "YYYY", "YYYY-MM" or "YYYY-MM-DD", and an empty date leaves Wikidata's value alone.
+async function planFromBody(body: any): Promise<TermPlan> {
+  const { personQid, positionQid, start, end, statementId } = body ?? {};
+  if (typeof personQid !== 'string' || !QID_RE.test(personQid)) throw new EditInputError('No officeholder Wikidata item to edit');
+  if (typeof positionQid !== 'string' || !QID_RE.test(positionQid)) throw new EditInputError('This office has no Wikidata item');
+  const startValue = parseDateInput(start, 'Took office');
+  const endValue = parseDateInput(end, 'Left office');
+  if (!startValue && !endValue) throw new EditInputError('Enter a took office or left office date to save');
+  if (startValue && endValue && startValue.time > endValue.time) throw new EditInputError('Left office is before took office');
+  if (statementId != null && typeof statementId !== 'string') throw new EditInputError('Invalid statement id');
+  const entity = await fetchEntityForEdit(personQid);
+  if (!entity) throw new EditInputError(`${personQid} wasn't found on Wikidata`);
+  return planTermEdit(entity, positionQid, startValue, endValue, statementId || null);
+}
+
+// What a save would change, for the user to confirm.
+wikidataRouter.post('/term/preview', requireAuth, async (req, res, next) => {
+  try {
+    const plan = await planFromBody(req.body);
+    res.json({ plan, username: req.session.user?.username, tags: config.wikidataEditTags || null });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else next(err);
+  }
+});
+
+wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
+  try {
+    // Re-planned from the live item rather than trusting the previewed plan, and refused if
+    // the item changed since the preview, so the user only publishes what they reviewed.
+    const plan = await planFromBody(req.body);
+    if (Number(req.body?.baseRevId) !== plan.baseRevId) {
+      res.status(409).json({ error: `${plan.personQid} has changed on Wikidata since the preview. Review the edit again.` });
+      return;
+    }
+    if (plan.needsChoice) throw new EditInputError('Choose which position held statement to edit');
+    if (plan.changes.length === 0) throw new EditInputError('Nothing to change: Wikidata already has these dates');
+    const applied = await applyTermPlan(req, plan);
+    invalidateOfficeholderHistory();
+    res.json({ ...applied, personQid: plan.personQid });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else if (err instanceof WikidataApiError) {
+      res.status(502).json({ error: `Wikidata refused the edit (${err.code}): ${err.message}`, revisions: err.completedRevisions });
+    } else next(err);
   }
 });

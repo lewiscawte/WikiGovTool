@@ -454,6 +454,21 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
 .copy-btn:disabled { color: var(--ink-muted); opacity: .4; cursor: not-allowed; }
 
 .dialog .status-line { margin-top: var(--gap-4); }
+
+/* What Save to Wikidata is about to publish, shown for confirmation first. */
+.edit-review {
+  margin-top: var(--gap-4); padding: var(--gap-3) var(--gap-4);
+  font-size: var(--t-sm);
+  border: 1px solid var(--blue); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--blue) 6%, var(--surface));
+}
+.edit-review-title { font: 600 var(--t-md) var(--sans); margin-bottom: var(--gap-2); }
+.edit-review-changes, .edit-review-choices { margin: var(--gap-2) 0; padding-left: var(--gap-6); }
+.edit-review-choices { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; gap: var(--gap-2); }
+.edit-review del { color: var(--ink-muted); }
+.edit-review ins { text-decoration: none; font-weight: 600; }
+.edit-review-note { margin-top: var(--gap-2); font-size: var(--t-xs); color: var(--ink-muted); }
+.edit-review-actions { display: flex; justify-content: flex-end; gap: var(--gap-2); margin-top: var(--gap-3); }
 .infobox-details { margin-top: var(--gap-2); }
 .infobox-details summary { cursor: pointer; font-size: var(--t-sm); color: var(--ink-muted); }
 .infobox-details pre {

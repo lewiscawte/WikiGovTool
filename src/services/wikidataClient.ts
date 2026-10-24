@@ -29,6 +29,21 @@ export async function resolveQidFromWikipediaTitle(title: string): Promise<strin
   return qid;
 }
 
+// Fresh (uncached) item JSON for building an edit: claims plus lastrevid, so the edit can be
+// sent with baserevid and fail on a conflict rather than overwrite someone else's change.
+export async function fetchEntityForEdit(qid: string): Promise<any | null> {
+  if (!QID_RE.test(qid)) throw new Error('Invalid QID');
+  const url = `${config.wikidataApi}?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=info|claims|labels&languages=en&format=json`;
+  const data = await wdFetch(url);
+  const entity = data.entities?.[qid];
+  return entity && !('missing' in entity) ? entity : null;
+}
+
+// Drops cached officeholder histories, after an edit to Wikidata changed one.
+export function invalidateOfficeholderHistory(): void {
+  historyCache.clear();
+}
+
 export interface EntitySearchResult {
   id: string;
   label: string;
