@@ -288,10 +288,10 @@ export function initMasthead({ load, rerender }) {
   loginToggle.addEventListener('click', async () => {
     if (loginToggle.dataset.loggedIn === 'true') {
       await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
-    } else {
-      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({}) }).catch(() => {});
+      await refreshLoginState();
+      return;
     }
-    await refreshLoginState();
+    window.location.href = '/api/auth/login';
   });
 
   async function populateCountries() {

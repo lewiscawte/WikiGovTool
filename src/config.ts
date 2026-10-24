@@ -8,6 +8,16 @@ export const config = {
   wikidataApi: process.env.WIKIDATA_API || 'https://www.wikidata.org/w/api.php',
   wikipediaApi: process.env.WIKIPEDIA_API || 'https://en.wikipedia.org/w/api.php',
   cacheTtlMs: Number(process.env.CACHE_TTL_MS) || 15 * 60 * 1000,
+  oauth: {
+    clientId: process.env.OAUTH_CLIENT_ID || '',
+    clientSecret: process.env.OAUTH_CLIENT_SECRET || '',
+    callbackUrl: process.env.OAUTH_CALLBACK_URL || 'http://localhost:3000/api/auth/callback',
+    authBase: process.env.OAUTH_AUTH_BASE || 'https://meta.wikimedia.org',
+    authorizeUrl: process.env.OAUTH_AUTHORIZE_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/authorize',
+    tokenUrl: process.env.OAUTH_TOKEN_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/access_token',
+    profileUrl: process.env.OAUTH_PROFILE_URL || 'https://meta.wikimedia.org/w/rest.php/oauth2/resource/profile',
+    scope: process.env.OAUTH_SCOPE || '',
+  },
 };
 
 // Wikimedia's API etiquette requires a descriptive User-Agent with contact info,

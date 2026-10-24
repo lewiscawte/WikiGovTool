@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { getEntity, searchEntities } from '../services/wikidataClient';
 import { requireAuth } from '../middleware/requireAuth';
+import { wikimediaApiPost } from '../services/wikimediaAuth';
+import { config } from '../config';
 
 const QID_RE = /^Q[1-9]\d*$/;
 
@@ -38,11 +40,27 @@ wikidataRouter.get('/entity/:qid', async (req, res, next) => {
   }
 });
 
-// Writes are disabled for now (read-only deployment). Wire this up to wbeditentity,
-// authenticated with the logged-in editor's own OAuth token, when ready to go live.
-wikidataRouter.post('/save', requireAuth, (_req, res) => {
-  res.status(501).json({
-    error: 'Writes to Wikidata are disabled in this deployment',
-    detail: 'Read-only mode: this endpoint is a placeholder until wbeditentity + a reviewed OAuth write flow are wired in.',
-  });
+wikidataRouter.post('/save', requireAuth, async (req, res, next) => {
+  try {
+    const { id, data, summary } = req.body as { id?: string; data?: any; summary?: string };
+    if (!id || !QID_RE.test(id)) {
+      res.status(400).json({ error: 'Invalid QID' });
+      return;
+    }
+    if (!data) {
+      res.status(400).json({ error: 'Missing data' });
+      return;
+    }
+
+    const result = await wikimediaApiPost(req, config.wikidataApi, {
+      action: 'wbeditentity',
+      id,
+      data: JSON.stringify(data),
+      summary: summary || 'Edit via WikiGovTool',
+    });
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
