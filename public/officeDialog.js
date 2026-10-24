@@ -365,13 +365,15 @@ const COMPARED = (title) => `Compared with "${title}". Fields marked ≠ differ;
 
 document.getElementById('pullBtn').addEventListener('click', async () => {
   const title = dialogFields.wp.value.trim();
+  const office = dialogFields.office.value.trim();
   if (!title) {
     setStatus(dialogStatus, "Enter the officeholder's Wikipedia article first.", true);
     return;
   }
   setStatus(dialogStatus, `Reading the infobox on "${title}"…`);
   try {
-    const { fields } = await api(`/api/wikipedia/infobox?title=${encodeURIComponent(title)}`);
+    const url = `/api/wikipedia/infobox?title=${encodeURIComponent(title)}${office ? `&office=${encodeURIComponent(office)}` : ''}`;
+    const { fields } = await api(url);
     fillCompareCell('name', fields.name || '');
     fillCompareCell('party', fields.party || '');
     fillCompareCell('start', fields.term_start || '');
