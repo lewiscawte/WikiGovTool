@@ -170,6 +170,32 @@ export function holderLine(className, officeholder, onAdd) {
   return line;
 }
 
+// Small icon links to an item's Wikidata and English Wikipedia pages, shown opposite a dialog
+// heading. Each icon appears only when the page exists: pass the item's real enwiki sitelink,
+// never a title guessed from a name. Monochrome, since red is reserved for mismatches.
+const WIKIDATA_ICON = '<svg viewBox="0 0 24 16" aria-hidden="true"><path d="M1 1h2v14H1zM5 1h1v14H5zM8 1h3v14H8zM13 1h1v14h-1zM16 1h2v14h-2zM20 1h1v14h-1zM22.5 1h.5v14h-.5z"/></svg>';
+const WIKIPEDIA_ICON = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="10" y="14.2" text-anchor="middle" class="source-link-w">W</text></svg>';
+
+export function renderSourceLinks(container, { qid, wikipediaTitle } = {}) {
+  container.innerHTML = '';
+  const add = (href, icon, label, className) => {
+    const a = document.createElement('a');
+    a.className = `source-link ${className}`;
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = label;
+    a.setAttribute('aria-label', label);
+    a.innerHTML = icon;
+    container.appendChild(a);
+  };
+  if (qid && QID_ONLY_RE.test(qid)) add(`https://www.wikidata.org/wiki/${qid}`, WIKIDATA_ICON, `Open ${qid} on Wikidata`, 'source-link-wd');
+  if (wikipediaTitle) {
+    add(`https://en.wikipedia.org/wiki/${encodeURIComponent(wikipediaTitle.replace(/ /g, '_'))}`, WIKIPEDIA_ICON,
+      `Open "${wikipediaTitle}" on English Wikipedia`, 'source-link-wp');
+  }
+}
+
 // A button that opens an office's comparison dialog; the row it sits in becomes clickable
 // via .office-open::after, so it must sit inside a positioned container.
 export function officeButton(entry, onOpen) {

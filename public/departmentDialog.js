@@ -1,9 +1,12 @@
-import { api, state } from './shared.js';
+import { api, renderSourceLinks, state } from './shared.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="departmentDialogBackdrop">
     <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="departmentDialogTitle">
-      <h2 class="dialog-title" id="departmentDialogTitle">Department</h2>
+      <div class="dialog-heading">
+        <h2 class="dialog-title" id="departmentDialogTitle">Department</h2>
+        <span class="source-links" id="deptSourceLinks"></span>
+      </div>
       <div id="deptAddSection">
         <p class="dialog-intro">Search for a department on Wikidata or add it locally.</p>
         <div class="field">
@@ -66,6 +69,7 @@ const wpInput = document.getElementById('deptWikipedia');
 const inceptionInput = document.getElementById('deptInception');
 const dissolvedInput = document.getElementById('deptDissolved');
 const profileBody = document.getElementById('deptProfileBody');
+const deptSourceLinks = document.getElementById('deptSourceLinks');
 const statusEl = document.getElementById('departmentDialogStatus');
 const cancelBtn = document.getElementById('departmentDialogCancel');
 const saveBtn = document.getElementById('departmentDialogSave');
@@ -116,6 +120,7 @@ function compared(dd, formValue, wikidataValue) {
 
 function renderProfile(message) {
   profileBody.innerHTML = '';
+  renderSourceLinks(deptSourceLinks, profile ? { qid: profile.qid, wikipediaTitle: profile.wikipediaTitle } : {});
   if (!profile) {
     const p = document.createElement('p');
     p.className = 'dept-profile-empty';

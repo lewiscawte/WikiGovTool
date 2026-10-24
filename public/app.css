@@ -374,6 +374,23 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
   margin: var(--gap-6) 0 var(--gap-3); padding-top: var(--gap-4); border-top: 1px solid var(--rule-soft);
 }
 .dialog-title + .dialog-section { margin-top: 0; padding-top: 0; border-top: 0; }
+.dialog-section, .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-3); }
+.dialog-heading { margin-bottom: var(--gap-4); }
+.dialog-heading .dialog-title { margin-bottom: 0; }
+
+/* Icon links to an item's Wikidata / Wikipedia pages, opposite a dialog heading. */
+.source-links { display: inline-flex; align-items: center; gap: var(--gap-2); flex-shrink: 0; }
+.source-links:empty { display: none; }
+.source-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius);
+  color: var(--ink-muted);
+}
+.source-link:hover, .source-link:focus-visible { color: var(--blue); background: var(--paper); }
+.source-link svg { display: block; fill: currentColor; }
+.source-link-wd svg { width: 21px; height: 14px; }
+.source-link-wp svg { width: 18px; height: 18px; }
+.source-link-w { font: 600 12px var(--serif); fill: currentColor; }
 .dialog-actions {
   display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--gap-2);
   margin-top: var(--gap-6);

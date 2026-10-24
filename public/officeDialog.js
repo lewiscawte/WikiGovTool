@@ -1,6 +1,6 @@
 // The office comparison dialog (Wikidata vs Wikipedia) and the add-office dialog, shared by
 // both pages. Importing this module adds the dialogs' markup to the page.
-import { api, officeTitle, QID_ONLY_RE, state } from './shared.js';
+import { api, officeTitle, QID_ONLY_RE, renderSourceLinks, state } from './shared.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="addOfficeBackdrop">
@@ -25,7 +25,7 @@ document.body.insertAdjacentHTML('beforeend', `
     <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
       <h2 class="dialog-title" id="dialogTitle">Office</h2>
 
-      <h3 class="dialog-section">Office</h3>
+      <h3 class="dialog-section"><span>Office</span><span class="source-links" id="officeSourceLinks"></span></h3>
       <div class="field"><label for="f-office">Title on Wikidata</label><input class="input" id="f-office"></div>
       <div class="grid-2">
         <div class="field"><label for="f-qid">Wikidata item</label><input class="input" placeholder="Q…" id="f-qid"></div>
@@ -55,7 +55,7 @@ document.body.insertAdjacentHTML('beforeend', `
         </div>
       </div>
 
-      <h3 class="dialog-section">Officeholder</h3>
+      <h3 class="dialog-section"><span>Officeholder</span><span class="source-links" id="holderSourceLinks"></span></h3>
       <div class="field"><label for="f-wp">Wikipedia article</label><input class="input" id="f-wp"></div>
       <button type="button" class="btn" id="pullBtn">Compare officeholder with Wikipedia</button>
 
@@ -131,6 +131,8 @@ const dialogFields = {
   end: document.getElementById('f-end'),
 };
 const pullOfficeBtn = document.getElementById('pullOfficeBtn');
+const officeSourceLinks = document.getElementById('officeSourceLinks');
+const holderSourceLinks = document.getElementById('holderSourceLinks');
 const dialogTitle = document.getElementById('dialogTitle');
 const dialogStatus = document.getElementById('dialogStatus');
 const infoboxPre = document.getElementById('infobox');
@@ -221,18 +223,27 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
   backdrop.classList.add('open');
   await refreshInfobox();
 
+  // Heading icons: Wikidata straight away; Wikipedia once the real sitelink is known. An
+  // office with no Wikidata item can only have the article it was added with.
+  renderSourceLinks(officeSourceLinks, { qid: position.wikidataQid, wikipediaTitle: position.wikidataQid ? null : position.wikipediaTitle });
+  renderSourceLinks(holderSourceLinks, { qid: officeholder?.personWikidataQid });
+
   // Fill in real sitelinks where Wikidata has them; keep the guesses otherwise.
   const lookups = [];
-  if (position.wikidataQid && !position.wikipediaTitle) {
+  if (position.wikidataQid) {
     lookups.push(api(`/api/wikidata/entity/${position.wikidataQid}`).then(({ entity }) => {
       const sitelink = entity?.sitelinks?.enwiki?.title;
-      if (sitelink && currentPositionId === position.id) dialogFields.officewp.value = sitelink;
+      if (currentPositionId !== position.id) return;
+      if (sitelink && !position.wikipediaTitle) dialogFields.officewp.value = sitelink;
+      renderSourceLinks(officeSourceLinks, { qid: position.wikidataQid, wikipediaTitle: sitelink });
     }));
   }
   if (officeholder?.personWikidataQid) {
     lookups.push(api(`/api/wikidata/entity/${officeholder.personWikidataQid}`).then(({ entity }) => {
       const sitelink = entity?.sitelinks?.enwiki?.title;
-      if (sitelink && currentPositionId === position.id) dialogFields.wp.value = sitelink;
+      if (currentPositionId !== position.id) return;
+      if (sitelink) dialogFields.wp.value = sitelink;
+      renderSourceLinks(holderSourceLinks, { qid: officeholder.personWikidataQid, wikipediaTitle: sitelink });
     }));
   }
   await Promise.allSettled(lookups);
