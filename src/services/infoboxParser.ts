@@ -65,8 +65,10 @@ export function parseTemplateFields(templateBlock: string): Record<string, strin
   return fields;
 }
 
+import { normalizeDate } from './dateParser';
+
 export function cleanWikitextValue(value: string): string {
-  return value
+  let cleaned = value
     .replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, '')
     .replace(/<ref[^>]*\/>/gi, '')
     .replace(/\{\{efn[^{}]*\}\}/gi, '')
@@ -75,4 +77,14 @@ export function cleanWikitextValue(value: string): string {
     .replace(/<br\s*\/?>/gi, ', ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Try to normalize dates if it looks like a date
+  if (cleaned && (cleaned.includes('{{') || /\d{4}/.test(cleaned))) {
+    const normalized = normalizeDate(cleaned);
+    if (normalized && normalized !== cleaned) {
+      return normalized;
+    }
+  }
+
+  return cleaned;
 }

@@ -15,6 +15,7 @@ import {
 } from './wikidataClient';
 import { buildEntry, existedOn, loadCabinetPositions } from './orgchart';
 import { Department, DepartmentsView, OrgChartEntry, OrgChartPosition } from '../types';
+import { getDepartmentOverride, listExtraDepartments } from '../store/departmentStore';
 
 // Country-specific Wikidata classes whose instances are that government's departments. Optional:
 // departments are also found through their head offices (see fetchDepartmentLinks), but only a
@@ -87,16 +88,38 @@ export function assembleDepartments(input: AssembleInput): DepartmentsView {
   const departments: Department[] = [];
   const placedCabinetQids = new Set<string>();
 
+  // Merge in extra departments (local)
+  const extraDepts = listExtraDepartments(input.country);
+  for (const extra of extraDepts) {
+    if (!details.has(extra.qid)) {
+      details.set(extra.qid, {
+        qid: extra.qid,
+        label: extra.label,
+        wikipediaTitle: extra.wikipediaTitle,
+        inception: extra.inception,
+        dissolved: extra.dissolved,
+      });
+    }
+  }
+
   for (const dept of details.values()) {
-    if (!existedOn(dept, date)) continue;
+    // Apply overrides
+    const override = getDepartmentOverride(dept.qid);
+    const deptLabel = override?.label ?? dept.label;
+    const deptWp = override?.wikipediaTitle !== undefined ? override.wikipediaTitle : dept.wikipediaTitle;
+    const deptIncep = override?.inception !== undefined ? override.inception : dept.inception;
+    const deptDiss = override?.dissolved !== undefined ? override.dissolved : dept.dissolved;
+
+    const deptForCheck = { qid: dept.qid, inception: deptIncep, dissolved: deptDiss };
+    if (!existedOn(deptForCheck as any, date)) continue;
 
     const positionFor = (qid: string, label: string): OrgChartPosition => {
       const fromCabinet = cabinetByQid.get(qid);
-      if (fromCabinet) return { ...fromCabinet, department: dept.label };
+      if (fromCabinet) return { ...fromCabinet, department: deptLabel };
       return {
         id: qid,
         title: label,
-        department: dept.label,
+        department: deptLabel,
         bucket: 'Minister',
         wikipediaTitle: null,
         wikidataQid: qid,
@@ -137,10 +160,10 @@ export function assembleDepartments(input: AssembleInput): DepartmentsView {
 
     departments.push({
       qid: dept.qid,
-      label: dept.label,
-      wikipediaTitle: dept.wikipediaTitle,
-      inception: dept.inception,
-      dissolved: dept.dissolved,
+      label: deptLabel,
+      wikipediaTitle: deptWp,
+      inception: deptIncep,
+      dissolved: deptDiss,
       heads,
       offices: memberEntries.filter((e) => e.officeholder),
       vacant: memberEntries.filter((e) => !e.officeholder),

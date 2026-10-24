@@ -275,6 +275,60 @@ document.getElementById('addOfficeSubmitBtn').addEventListener('click', async ()
 // A Wikidata-side value counts as "empty" for comparison purposes even when it's holding one
 // of our own placeholder strings ("Unknown", "Still exists", "Incumbent") rather than blank.
 const EMPTY_PLACEHOLDERS = new Set(['', 'unknown', 'still exists', 'incumbent']);
+
+const MONTHS = {
+  january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+  july: '07', august: '08', september: '09', oct: '10', october: '10',
+  nov: '11', november: '11', dec: '12', december: '12',
+};
+
+function normalizeDateForCompare(s) {
+  if (!s) return s;
+  const cleaned = s.replace(/<[^>]+>/g, '').replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1').replace(/\[\[([^\]]+)\]\]/g, '$1').trim();
+  
+  // Handle templates roughly
+  if (cleaned.includes('{{')) {
+    // Try to extract date from templates
+    const tmpl = cleaned.match(/\{\{[^{}]*\|([^{}|]+(?:\|[^{}]+)*)\}\}/i);
+    if (tmpl) {
+      const parts = tmpl[1].split('|').map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 3 && /^\d{4}$/.test(parts[0]) && /^\d{1,2}$/.test(parts[1]) && /^\d{1,2}$/.test(parts[2])) {
+        return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+      }
+      for (const part of parts) {
+        const res = normalizeDateForCompare(part);
+        if (res && res !== part) return res;
+      }
+    }
+  }
+  
+  const iso = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2,'0')}-${iso[3].padStart(2,'0')}`;
+  
+  const dmy = cleaned.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  if (dmy) {
+    const month = MONTHS[dmy[2].toLowerCase()];
+    if (month) return `${dmy[3]}-${month}-${dmy[1].padStart(2,'0')}`;
+  }
+  
+  const mdy = cleaned.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+  if (mdy) {
+    const month = MONTHS[mdy[1].toLowerCase()];
+    if (month) return `${mdy[3]}-${month}-${mdy[2].padStart(2,'0')}`;
+  }
+  
+  const my = cleaned.match(/([A-Za-z]+)\s+(\d{4})/);
+  if (my) {
+    const month = MONTHS[my[1].toLowerCase()];
+    if (month) return `${my[2]}-${month}-01`;
+  }
+  
+  const y = cleaned.match(/^(\d{4})$/);
+  if (y) return `${y[1]}-01-01`;
+  
+  return cleaned.toLowerCase();
+}
+
 function fillCompareCell(key, wikipediaValue) {
   const cell = compareCells[key];
   cell.wiki.textContent = wikipediaValue || '—';
@@ -284,7 +338,16 @@ function fillCompareCell(key, wikipediaValue) {
     return;
   }
   const wikidataNorm = cell.input.value.trim().toLowerCase();
-  const differs = EMPTY_PLACEHOLDERS.has(wikidataNorm) || wikidataNorm !== wikipediaValue.trim().toLowerCase();
+  const wikiNorm = normalizeDateForCompare(wikipediaValue);
+  const wdNorm = normalizeDateForCompare(cell.input.value.trim());
+  
+  const isDateField = ['inception', 'dissolved', 'start', 'end'].includes(key);
+  let differs;
+  if (isDateField && wikiNorm.match(/^\d{4}-\d{2}-\d{2}$/) && wdNorm.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    differs = wikiNorm !== wdNorm;
+  } else {
+    differs = EMPTY_PLACEHOLDERS.has(wikidataNorm) || wdNorm !== wikiNorm;
+  }
   cell.wiki.classList.toggle('mismatch', differs);
 }
 
