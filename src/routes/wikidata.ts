@@ -5,7 +5,6 @@ import {
 } from '../services/wikidataEdits';
 import { fetchRevisionTitle } from '../services/wikipediaClient';
 import { requireAuth } from '../middleware/requireAuth';
-import { wikimediaApiPost } from '../services/wikimediaAuth';
 import { config } from '../config';
 
 const QID_RE = /^Q[1-9]\d*$/;
@@ -39,31 +38,6 @@ wikidataRouter.get('/entity/:qid', async (req, res, next) => {
       return;
     }
     res.json({ entity });
-  } catch (err) {
-    next(err);
-  }
-});
-
-wikidataRouter.post('/save', requireAuth, async (req, res, next) => {
-  try {
-    const { id, data, summary } = req.body as { id?: string; data?: any; summary?: string };
-    if (!id || !QID_RE.test(id)) {
-      res.status(400).json({ error: 'Invalid QID' });
-      return;
-    }
-    if (!data) {
-      res.status(400).json({ error: 'Missing data' });
-      return;
-    }
-
-    const result = await wikimediaApiPost(req, config.wikidataApi, {
-      action: 'wbeditentity',
-      id,
-      data: JSON.stringify(data),
-      summary: summary || 'Edit via WikiGovTool',
-    });
-
-    res.json(result);
   } catch (err) {
     next(err);
   }

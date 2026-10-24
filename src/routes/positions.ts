@@ -20,7 +20,7 @@ function slugify(title: string): string {
 // Creates a local-only office stub — for a position that exists in the real government but
 // has no Wikidata item yet (or none we've found). wikidataQid always starts null: the point
 // is to flag the gap, not to fabricate a Wikidata link. Does not create anything on Wikidata
-// itself (writes remain disabled — see POST /api/wikidata/save).
+// itself (the only Wikidata writes are term dates — see POST /api/wikidata/term/save).
 positionsRouter.post('/', requireAuth, (req, res) => {
   const { countryQid, title, department, wikipediaTitle } = req.body ?? {};
   if (typeof title !== 'string' || !title.trim()) {
@@ -72,7 +72,7 @@ positionsRouter.get('/:id/history', async (req, res, next) => {
 });
 
 // Local-only: repoints this position at a different Wikidata QID / Wikipedia title.
-// Does not write to Wikidata itself (see POST /api/wikidata/save).
+// Does not write to Wikidata itself.
 positionsRouter.put('/:id/link', requireAuth, (req, res) => {
   const position = getPosition(req.params.id);
   if (!position) {
