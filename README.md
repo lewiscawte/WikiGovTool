@@ -33,11 +33,12 @@ came from.
 
 The backend is a small Express server in TypeScript (`src/`). It reads Wikidata through the
 Wikidata Query Service (SPARQL) and the Action API, and Wikipedia through its Action API,
-caching results for 15 minutes. The frontend (`public/`) is plain HTML, CSS and ES modules
+caching results in memory and, when configured, in Redis. The frontend (`public/`) is plain HTML, CSS and ES modules
 with no build step.
 
 There's no database. Local additions and edits live in server memory and are lost on restart;
-Wikidata and Wikipedia are always the source of truth.
+Wikidata and Wikipedia are always the source of truth. Edits are always built from live data,
+never from the cache.
 
 The first load for a country can take up to a minute, because the queries that find a
 country's offices are slow when nothing is cached yet.
@@ -75,7 +76,12 @@ them all with their defaults.
 | `OAUTH_CALLBACK_URL` | Must match the consumer's registered callback |
 | `WIKIDATA_EDIT_TAGS` | Change tags added to every Wikidata edit (comma-separated). Each must already exist on Wikidata |
 | `GIT_COMMIT` | Commit shown in the footer, only needed where the server runs without a `.git` directory |
-| `CACHE_TTL_MS` | How long Wikidata/Wikipedia responses are cached (default 15 minutes) |
+| `CACHE_TTL_MS` | How long Wikipedia articles and Wikidata items are cached (default 15 minutes) |
+| `CACHE_HISTORY_TTL_MS` | How long officeholder histories stay fresh (default 6 hours) |
+| `CACHE_STRUCTURE_TTL_MS` | How long offices, departments and their links stay fresh (default 24 hours) |
+| `CACHE_COUNTRIES_TTL_MS` | How long the country list stays fresh (default 7 days) |
+| `CACHE_STALE_MS` | How long past those an entry can still be shown while it's refreshed in the background (default 7 days, 0 to disable) |
+| `REDIS_URL`, `REDIS_KEY_PREFIX` | Optional. Keeps the cache across restarts; without both, it's memory only |
 
 ### OAuth
 
@@ -111,6 +117,12 @@ npm run build
 Set `NODE_ENV=production`, a real `SESSION_SECRET`, and the production consumer's OAuth
 settings. The footer shows the running commit, linked to GitHub, to make bug reports easier
 to match to a version.
+
+To use [Toolforge's shared Redis](https://wikitech.wikimedia.org/wiki/Help:Toolforge/Redis),
+set `REDIS_URL=redis://redis.svc.tools.eqiad1.wikimedia.cloud:6379` and `REDIS_KEY_PREFIX` to
+the output of `openssl rand -hex 32`. Every tool can read and overwrite that instance, so the
+prefix must stay secret, and only public data may go in it: never sessions, which hold OAuth
+tokens. Cache activity is logged with `[cache]` and `[upstream]` prefixes.
 
 ## Project layout
 

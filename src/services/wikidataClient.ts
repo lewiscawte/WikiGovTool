@@ -1,32 +1,37 @@
-import { config, userAgent } from '../config';
-import { TtlCache } from '../cache';
+import { config } from '../config';
+import { ReadThroughCache } from '../cache';
+import { upstreamJson } from './upstream';
 
 const QID_RE = /^Q[1-9]\d*$/;
 const ENTITY_URI_PREFIX = 'http://www.wikidata.org/entity/';
 const toQid = (uri: string): string => uri.replace(ENTITY_URI_PREFIX, '');
 
-const qidCache = new TtlCache<string | null>(config.cacheTtlMs);
-const historyCache = new TtlCache<PositionHistoryRow[]>(config.cacheTtlMs);
-const cabinetPositionsCache = new TtlCache<CabinetPosition[]>(config.cacheTtlMs);
-const lifespanCache = new TtlCache<Map<string, PositionLifespan>>(config.cacheTtlMs);
-const deputyPairsCache = new TtlCache<DeputyPair[]>(config.cacheTtlMs);
+const SEARCH_TTL_MS = 5 * 60 * 1000;
 
-async function wdFetch(url: string): Promise<any> {
-  const res = await fetch(url, { headers: { 'User-Agent': userAgent(), Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`Wikidata request failed: ${res.status} ${res.statusText}`);
-  return res.json();
-}
+const persistent = <V>(namespace: string, ttlMs: number) => new ReadThroughCache<V>(namespace, { ttlMs, staleMs: config.cacheStaleMs });
+const structureCache = <V>(namespace: string) => persistent<V>(namespace, config.cacheStructureTtlMs);
+
+const qidCache = structureCache<string | null>('qid');
+const historyCache = persistent<PositionHistoryRow[]>('history', config.cacheHistoryTtlMs);
+const cabinetPositionsCache = structureCache<CabinetPosition[]>('cabinet');
+const lifespanCache = structureCache<PositionLifespan>('lifespan');
+const deputiesCache = structureCache<string[]>('deputies');
+const entityCache = new ReadThroughCache<unknown | null>('entity', { ttlMs: config.cacheTtlMs, memoryOnly: true });
+const entitySearchCache = new ReadThroughCache<EntitySearchResult[]>('entity-search', { ttlMs: SEARCH_TTL_MS, memoryOnly: true });
+const peopleCache = new ReadThroughCache<PersonCandidate | null>('people', { ttlMs: SEARCH_TTL_MS, memoryOnly: true });
+
+const wdFetch = (url: string): Promise<any> => upstreamJson(url, 'Wikidata');
+const uniqueValidQids = (qids: string[]) => [...new Set(qids.filter((q) => QID_RE.test(q)))];
+const emptyListsFor = <T>(qids: string[]) => new Map<string, T[]>(qids.map((q) => [q, []]));
 
 export async function resolveQidFromWikipediaTitle(title: string): Promise<string | null> {
-  const cached = qidCache.get(title);
-  if (cached !== undefined) return cached;
-  const url = `${config.wikidataApi}?action=wbgetentities&sites=enwiki&titles=${encodeURIComponent(title)}&props=info&format=json`;
-  const data = await wdFetch(url);
-  const entities = data.entities ?? {};
-  const key = Object.keys(entities)[0];
-  const qid = key && key !== '-1' ? key : null;
-  qidCache.set(title, qid);
-  return qid;
+  return qidCache.getOrFetch(title, async () => {
+    const url = `${config.wikidataApi}?action=wbgetentities&sites=enwiki&titles=${encodeURIComponent(title)}&props=info&format=json`;
+    const data = await wdFetch(url);
+    const entities = data.entities ?? {};
+    const key = Object.keys(entities)[0];
+    return key && key !== '-1' ? key : null;
+  });
 }
 
 // Fresh (uncached) item JSON for building an edit: claims plus lastrevid, so the edit can be
@@ -39,9 +44,9 @@ export async function fetchEntityForEdit(qid: string): Promise<any | null> {
   return entity && !('missing' in entity) ? entity : null;
 }
 
-// Drops cached officeholder histories, after an edit to Wikidata changed one.
-export function invalidateOfficeholderHistory(): void {
-  historyCache.clear();
+// Drops an office's cached holders, after an edit to Wikidata changed them.
+export function invalidateOfficeholderHistory(positionQid: string): Promise<void> {
+  return historyCache.invalidate(positionQid);
 }
 
 export interface EntitySearchResult {
@@ -51,20 +56,24 @@ export interface EntitySearchResult {
 }
 
 export async function searchEntities(query: string, limit = 8): Promise<EntitySearchResult[]> {
-  const url = `${config.wikidataApi}?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&limit=${limit}&format=json`;
-  const data = await wdFetch(url);
-  return (data.search ?? []).map((r: any) => ({
-    id: r.id,
-    label: r.label ?? r.id,
-    description: r.description ?? null,
-  }));
+  return entitySearchCache.getOrFetch(`${limit}:${query}`, async () => {
+    const url = `${config.wikidataApi}?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&limit=${limit}&format=json`;
+    const data = await wdFetch(url);
+    return (data.search ?? []).map((r: any) => ({
+      id: r.id,
+      label: r.label ?? r.id,
+      description: r.description ?? null,
+    }));
+  });
 }
 
 export async function getEntity(qid: string): Promise<unknown | null> {
   if (!QID_RE.test(qid)) throw new Error('Invalid QID');
-  const url = `${config.wikidataApi}?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=labels|claims|sitelinks&languages=en&format=json`;
-  const data = await wdFetch(url);
-  return data.entities?.[qid] ?? null;
+  return entityCache.getOrFetch(qid, async () => {
+    const url = `${config.wikidataApi}?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=labels|claims|sitelinks&languages=en&format=json`;
+    const data = await wdFetch(url);
+    return data.entities?.[qid] ?? null;
+  });
 }
 
 export interface PositionHistoryRow {
@@ -109,28 +118,27 @@ function dateValue(binding: any): string | null {
 // Fetches the full holder history (not just the current holder) for a batch of position
 // QIDs in a single SPARQL query, so the timeline slider doesn't need one call per scrub.
 export async function fetchOfficeholderHistory(qids: string[]): Promise<PositionHistoryRow[]> {
-  const validQids = qids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(qids);
   if (validQids.length === 0) return [];
 
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = historyCache.get(cacheKey);
-  if (cached) return cached;
-
-  const query = buildHistoryQuery(validQids);
-  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
-  const data = await wdFetch(url);
-  const rows: PositionHistoryRow[] = (data.results?.bindings ?? []).map((b: any) => ({
-    positionQid: toQid(b.position.value),
-    personQid: toQid(b.person.value),
-    personLabel: b.personLabel?.value ?? '',
-    partyLabel: b.partyLabel?.value ?? null,
-    start: dateValue(b.start),
-    end: dateValue(b.end),
-    endUnknown: Boolean(b.end) && dateValue(b.end) === null,
-    imageUrl: b.image?.value ?? null,
-  }));
-  historyCache.set(cacheKey, rows);
-  return rows;
+  const byPosition = await historyCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(buildHistoryQuery(missing));
+    const rows = emptyListsFor<PositionHistoryRow>(missing);
+    for (const b of bindings) {
+      rows.get(toQid(b.position.value))?.push({
+        positionQid: toQid(b.position.value),
+        personQid: toQid(b.person.value),
+        personLabel: b.personLabel?.value ?? '',
+        partyLabel: b.partyLabel?.value ?? null,
+        start: dateValue(b.start),
+        end: dateValue(b.end),
+        endUnknown: Boolean(b.end) && dateValue(b.end) === null,
+        imageUrl: b.image?.value ?? null,
+      });
+    }
+    return rows;
+  });
+  return validQids.flatMap((q) => byPosition.get(q) ?? []);
 }
 
 export interface PositionLifespan {
@@ -152,26 +160,20 @@ function buildLifespanQuery(qids: string[]): string {
 // genuinely-defunct offices (e.g. some abolished 20th-century UK ministries) have neither
 // property set on Wikidata, so they can't be caught this way.
 export async function fetchPositionLifespans(qids: string[]): Promise<Map<string, PositionLifespan>> {
-  const validQids = qids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(qids);
   if (validQids.length === 0) return new Map();
 
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = lifespanCache.get(cacheKey);
-  if (cached) return cached;
-
-  const query = buildLifespanQuery(validQids);
-  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
-  const data = await wdFetch(url);
-
-  const result = new Map<string, PositionLifespan>();
-  for (const b of data.results?.bindings ?? []) {
-    result.set(toQid(b.position.value), {
-      inception: b.inception?.value ?? null,
-      dissolved: b.dissolved?.value ?? null,
-    });
-  }
-  lifespanCache.set(cacheKey, result);
-  return result;
+  return lifespanCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(buildLifespanQuery(missing));
+    const result = new Map<string, PositionLifespan>(missing.map((q) => [q, { inception: null, dissolved: null }]));
+    for (const b of bindings) {
+      result.set(toQid(b.position.value), {
+        inception: b.inception?.value ?? null,
+        dissolved: b.dissolved?.value ?? null,
+      });
+    }
+    return result;
+  });
 }
 
 export interface CabinetPosition {
@@ -215,16 +217,15 @@ LIMIT 200`;
 // country's positions are curated on Wikidata, which varies a great deal.
 export async function fetchCabinetPositions(countryQid: string): Promise<CabinetPosition[]> {
   if (!QID_RE.test(countryQid)) throw new Error('Invalid country QID');
-  const cached = cabinetPositionsCache.get(countryQid);
-  if (cached) return cached;
+  return cabinetPositionsCache.getOrFetch(countryQid, () => queryCabinetPositions(countryQid));
+}
 
-  const query = buildCabinetPositionsQuery(countryQid);
-  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
-  const data = await wdFetch(url);
+async function queryCabinetPositions(countryQid: string): Promise<CabinetPosition[]> {
+  const bindings = await runSparql(buildCabinetPositionsQuery(countryQid));
 
   const bucketRank = (classQid: string) => BUCKET_CLASSES.findIndex((c) => c.qid === classQid);
   const best = new Map<string, { classQid: string; label: string; department: string | null }>();
-  for (const b of data.results?.bindings ?? []) {
+  for (const b of bindings) {
     const qid = toQid(b.position.value);
     const classQid = toQid(b.class.value);
     if (bucketRank(classQid) === -1) continue;
@@ -245,12 +246,10 @@ export async function fetchCabinetPositions(countryQid: string): Promise<Cabinet
   // could silently push its single Head of State entry (e.g. a monarch) out of the slice
   // purely by chance ordering. This bit the UK: "Monarch of the United Kingdom" was being
   // discovered correctly but then dropped by an unprioritized cutoff.
-  const result: CabinetPosition[] = [...best.entries()]
+  return [...best.entries()]
     .map(([qid, v]) => ({ qid, label: v.label, bucket: BUCKET_CLASSES[bucketRank(v.classQid)].bucket, department: v.department }))
     .sort((a, b) => bucketNameRank(a.bucket) - bucketNameRank(b.bucket))
     .slice(0, 100);
-  cabinetPositionsCache.set(countryQid, result);
-  return result;
 }
 
 export interface DeputyPair {
@@ -273,24 +272,21 @@ function buildDeputyPairsQuery(qids: string[]): string {
 // where BOTH ends are already in `qids` are returned — a deputy whose senior fell outside our
 // discovered set (or vice versa) can't be sensibly nested, so it's left as top-level.
 export async function fetchDeputyPairs(qids: string[]): Promise<DeputyPair[]> {
-  const validQids = qids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(qids);
   if (validQids.length === 0) return [];
 
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = deputyPairsCache.get(cacheKey);
-  if (cached) return cached;
+  const juniorsBySenior = await deputiesCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(buildDeputyPairsQuery(missing));
+    const juniors = emptyListsFor<string>(missing);
+    for (const b of bindings) juniors.get(toQid(b.senior.value))?.push(toQid(b.junior.value));
+    return juniors;
+  });
 
-  const query = buildDeputyPairsQuery(validQids);
-  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
-  const data = await wdFetch(url);
-
+  // Filtered here, not before caching, because the requested set differs between callers.
   const qidSet = new Set(validQids);
-  const result: DeputyPair[] = (data.results?.bindings ?? [])
-    .map((b: any) => ({ seniorQid: toQid(b.senior.value), juniorQid: toQid(b.junior.value) }))
-    .filter((p: DeputyPair) => qidSet.has(p.juniorQid));
-
-  deputyPairsCache.set(cacheKey, result);
-  return result;
+  return validQids.flatMap((seniorQid) => (juniorsBySenior.get(seniorQid) ?? [])
+    .filter((juniorQid) => qidSet.has(juniorQid))
+    .map((juniorQid) => ({ seniorQid, juniorQid })));
 }
 async function runSparql(query: string): Promise<any[]> {
   const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(query)}&format=json`;
@@ -305,28 +301,29 @@ export interface DepartmentLink {
   departmentQid: string;
 }
 
-const departmentLinksCache = new TtlCache<DepartmentLink[]>(config.cacheTtlMs);
+const departmentLinksCache = structureCache<string[]>('department-links');
 
 // Which department each office runs. Wikidata records this from either end — P2389
 // ("organization directed by the office") on the office, or P2388 ("office held by head of
 // the organization") on the department — and coverage of the two differs, so check both.
 export async function fetchDepartmentLinks(positionQids: string[]): Promise<DepartmentLink[]> {
-  const validQids = positionQids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(positionQids);
   if (validQids.length === 0) return [];
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = departmentLinksCache.get(cacheKey);
-  if (cached) return cached;
 
-  const bindings = await runSparql(`SELECT DISTINCT ?position ?dept WHERE {
-  VALUES ?position { ${valuesList(validQids)} }
+  const departmentsByPosition = await departmentLinksCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(`SELECT DISTINCT ?position ?dept WHERE {
+  VALUES ?position { ${valuesList(missing)} }
   { ?position wdt:P2389 ?dept . } UNION { ?dept wdt:P2388 ?position . }
 }`);
-  const result = bindings.map((b: any) => ({ positionQid: toQid(b.position.value), departmentQid: toQid(b.dept.value) }));
-  departmentLinksCache.set(cacheKey, result);
-  return result;
+    const departments = emptyListsFor<string>(missing);
+    for (const b of bindings) departments.get(toQid(b.position.value))?.push(toQid(b.dept.value));
+    return departments;
+  });
+  return validQids.flatMap((positionQid) => (departmentsByPosition.get(positionQid) ?? [])
+    .map((departmentQid) => ({ positionQid, departmentQid })));
 }
 
-const departmentsOfClassCache = new TtlCache<string[]>(config.cacheTtlMs);
+const departmentsOfClassCache = structureCache<string[]>('departments-of-class');
 
 // Every item that is directly an instance of a country-specific department class (e.g.
 // "United States federal executive department"), including abolished ones — this is what
@@ -334,12 +331,10 @@ const departmentsOfClassCache = new TtlCache<string[]>(config.cacheTtlMs);
 // whose head office isn't in the current cabinet list.
 export async function fetchDepartmentsOfClass(classQid: string): Promise<string[]> {
   if (!QID_RE.test(classQid)) throw new Error('Invalid class QID');
-  const cached = departmentsOfClassCache.get(classQid);
-  if (cached) return cached;
-  const bindings = await runSparql(`SELECT DISTINCT ?dept WHERE { ?dept wdt:P31 wd:${classQid} . }`);
-  const result = bindings.map((b: any) => toQid(b.dept.value));
-  departmentsOfClassCache.set(classQid, result);
-  return result;
+  return departmentsOfClassCache.getOrFetch(classQid, async () => {
+    const bindings = await runSparql(`SELECT DISTINCT ?dept WHERE { ?dept wdt:P31 wd:${classQid} . }`);
+    return bindings.map((b: any) => toQid(b.dept.value));
+  });
 }
 
 export interface DepartmentDetails {
@@ -350,38 +345,42 @@ export interface DepartmentDetails {
   dissolved: string | null;
 }
 
-const departmentDetailsCache = new TtlCache<Map<string, DepartmentDetails>>(config.cacheTtlMs);
+const departmentDetailsCache = structureCache<DepartmentDetails | null>('department-details');
 
 export async function fetchDepartmentDetails(departmentQids: string[]): Promise<Map<string, DepartmentDetails>> {
-  const validQids = departmentQids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(departmentQids);
   if (validQids.length === 0) return new Map();
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = departmentDetailsCache.get(cacheKey);
-  if (cached) return cached;
 
-  // A department can carry several P571/P576 values (re-foundings, disputed dates): take the
-  // earliest inception and latest dissolution so it isn't hidden on a date it plausibly existed.
-  const bindings = await runSparql(`SELECT ?dept (SAMPLE(?label) AS ?deptLabel) (SAMPLE(?title) AS ?article)
+  const found = await departmentDetailsCache.getMany(validQids, async (missing) => {
+    // A department can carry several P571/P576 values (re-foundings, disputed dates): take the
+    // earliest inception and latest dissolution so it isn't hidden on a date it plausibly existed.
+    const bindings = await runSparql(`SELECT ?dept (SAMPLE(?label) AS ?deptLabel) (SAMPLE(?title) AS ?article)
        (MIN(?inception) AS ?founded) (MAX(?dissolved) AS ?abolished) WHERE {
-  VALUES ?dept { ${valuesList(validQids)} }
+  VALUES ?dept { ${valuesList(missing)} }
   OPTIONAL { ?dept rdfs:label ?label . FILTER(LANG(?label) = "en") }
   OPTIONAL { ?dept wdt:P571 ?inception . }
   OPTIONAL { ?dept wdt:P576 ?dissolved . }
   OPTIONAL { ?a schema:about ?dept ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?title . }
 } GROUP BY ?dept`);
 
+    const result = new Map<string, DepartmentDetails | null>(missing.map((q) => [q, null]));
+    for (const b of bindings) {
+      const qid = toQid(b.dept.value);
+      result.set(qid, {
+        qid,
+        label: b.deptLabel?.value ?? qid,
+        wikipediaTitle: b.article?.value ?? null,
+        inception: b.founded?.value ?? null,
+        dissolved: b.abolished?.value ?? null,
+      });
+    }
+    return result;
+  });
+
   const result = new Map<string, DepartmentDetails>();
-  for (const b of bindings) {
-    const qid = toQid(b.dept.value);
-    result.set(qid, {
-      qid,
-      label: b.deptLabel?.value ?? qid,
-      wikipediaTitle: b.article?.value ?? null,
-      inception: b.founded?.value ?? null,
-      dissolved: b.abolished?.value ?? null,
-    });
+  for (const [qid, details] of found) {
+    if (details) result.set(qid, details);
   }
-  departmentDetailsCache.set(cacheKey, result);
   return result;
 }
 
@@ -392,21 +391,19 @@ export interface DepartmentOfficeRow {
   role: 'head' | 'member';
 }
 
-const departmentOfficesCache = new TtlCache<DepartmentOfficeRow[]>(config.cacheTtlMs);
+const departmentOfficesCache = structureCache<DepartmentOfficeRow[]>('department-offices');
 
 // The offices inside each department: its head (P2389 / P2388, as above) plus anything that
 // is P361 "part of" it. P361 also links agencies, armed forces, even military operations, so
 // rows are restricted to items someone has actually held (P39). Checking the position class
 // via P31/P279* instead is correct too but ~50x slower and times out for a whole government.
 export async function fetchDepartmentOffices(departmentQids: string[]): Promise<DepartmentOfficeRow[]> {
-  const validQids = departmentQids.filter((q) => QID_RE.test(q));
+  const validQids = uniqueValidQids(departmentQids);
   if (validQids.length === 0) return [];
-  const cacheKey = validQids.slice().sort().join(',');
-  const cached = departmentOfficesCache.get(cacheKey);
-  if (cached) return cached;
 
-  const bindings = await runSparql(`SELECT DISTINCT ?dept ?position ?positionLabel ?role WHERE {
-  VALUES ?dept { ${valuesList(validQids)} }
+  const officesByDepartment = await departmentOfficesCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(`SELECT DISTINCT ?dept ?position ?positionLabel ?role WHERE {
+  VALUES ?dept { ${valuesList(missing)} }
   { ?position wdt:P2389 ?dept . BIND("head" AS ?role) }
   UNION { ?dept wdt:P2388 ?position . BIND("head" AS ?role) }
   UNION { ?position wdt:P361 ?dept . BIND("member" AS ?role) }
@@ -414,22 +411,24 @@ export async function fetchDepartmentOffices(departmentQids: string[]): Promise<
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }`);
 
-  // An office can match as both head and member (e.g. P2389 and P361 both set): head wins.
-  const byKey = new Map<string, DepartmentOfficeRow>();
-  for (const b of bindings) {
-    const row: DepartmentOfficeRow = {
-      departmentQid: toQid(b.dept.value),
-      positionQid: toQid(b.position.value),
-      positionLabel: b.positionLabel?.value ?? toQid(b.position.value),
-      role: b.role.value === 'head' ? 'head' : 'member',
-    };
-    const key = `${row.departmentQid}|${row.positionQid}`;
-    const existing = byKey.get(key);
-    if (!existing || (existing.role === 'member' && row.role === 'head')) byKey.set(key, row);
-  }
-  const result = [...byKey.values()];
-  departmentOfficesCache.set(cacheKey, result);
-  return result;
+    // An office can match as both head and member (e.g. P2389 and P361 both set): head wins.
+    const byKey = new Map<string, DepartmentOfficeRow>();
+    for (const b of bindings) {
+      const row: DepartmentOfficeRow = {
+        departmentQid: toQid(b.dept.value),
+        positionQid: toQid(b.position.value),
+        positionLabel: b.positionLabel?.value ?? toQid(b.position.value),
+        role: b.role.value === 'head' ? 'head' : 'member',
+      };
+      const key = `${row.departmentQid}|${row.positionQid}`;
+      const existing = byKey.get(key);
+      if (!existing || (existing.role === 'member' && row.role === 'head')) byKey.set(key, row);
+    }
+    const offices = emptyListsFor<DepartmentOfficeRow>(missing);
+    for (const row of byKey.values()) offices.get(row.departmentQid)?.push(row);
+    return offices;
+  });
+  return validQids.flatMap((q) => officesByDepartment.get(q) ?? []);
 }
 
 export interface LinkedItem {
@@ -455,7 +454,7 @@ export interface DepartmentProfile {
   replacedBy: LinkedItem[];
 }
 
-const departmentProfileCache = new TtlCache<DepartmentProfile | null>(config.cacheTtlMs);
+const departmentProfileCache = structureCache<DepartmentProfile | null>('department-profile');
 
 // Everything the department dialog shows for one item. Linked items come back with their
 // labels (one row per value, so each property is a separate OPTIONAL and rows multiply —
@@ -472,9 +471,10 @@ const PROFILE_LINKS: Record<string, keyof DepartmentProfile> = {
 
 export async function fetchDepartmentProfile(qid: string): Promise<DepartmentProfile | null> {
   if (!QID_RE.test(qid)) throw new Error('Invalid QID');
-  const cached = departmentProfileCache.get(qid);
-  if (cached !== undefined) return cached;
+  return departmentProfileCache.getOrFetch(qid, () => queryDepartmentProfile(qid));
+}
 
+async function queryDepartmentProfile(qid: string): Promise<DepartmentProfile | null> {
   const [scalars, links] = await Promise.all([
     runSparql(`SELECT (SAMPLE(?label) AS ?l) (SAMPLE(?desc) AS ?d) (SAMPLE(?title) AS ?article)
        (MIN(?inception) AS ?founded) (MAX(?dissolved) AS ?abolished) (SAMPLE(?site) AS ?website)
@@ -497,10 +497,7 @@ export async function fetchDepartmentProfile(qid: string): Promise<DepartmentPro
   ]);
 
   const s = scalars[0];
-  if (!s?.l && links.length === 0) {
-    departmentProfileCache.set(qid, null);
-    return null;
-  }
+  if (!s?.l && links.length === 0) return null;
   const profile: DepartmentProfile = {
     qid,
     label: s?.l?.value ?? qid,
@@ -519,7 +516,6 @@ export async function fetchDepartmentProfile(qid: string): Promise<DepartmentPro
     const valueQid = toQid(b.value.value);
     if (!list.some((i) => i.qid === valueQid)) list.push({ qid: valueQid, label: b.valueLabel?.value ?? valueQid });
   }
-  departmentProfileCache.set(qid, profile);
   return profile;
 }
 
@@ -539,15 +535,27 @@ export interface PersonCandidate {
 // how Wikidata models people), with what the officeholder picker shows for each. Order of
 // the result follows `qids`.
 export async function fetchPeople(qids: string[], positionQid: string | null): Promise<PersonCandidate[]> {
-  const validQids = [...new Set(qids.filter((q) => QID_RE.test(q)))];
+  const validQids = uniqueValidQids(qids);
   if (validQids.length === 0) return [];
-  const heldBind = positionQid && QID_RE.test(positionQid)
-    ? `BIND(EXISTS { ?person wdt:P39 wd:${positionQid} . } AS ?held)`
+  const heldQid = positionQid && QID_RE.test(positionQid) ? positionQid : null;
+  const cacheId = (qid: string) => `${qid}|${heldQid ?? ''}`;
+
+  const found = await peopleCache.getMany(validQids.map(cacheId), async (missingIds) => {
+    const missing = missingIds.map((id) => id.split('|')[0]);
+    const people = await queryPeople(missing, heldQid);
+    return new Map(missing.map((q) => [cacheId(q), people.get(q) ?? null]));
+  });
+  return validQids.map((q) => found.get(cacheId(q))).filter((p): p is PersonCandidate => !!p);
+}
+
+async function queryPeople(qids: string[], heldQid: string | null): Promise<Map<string, PersonCandidate>> {
+  const heldBind = heldQid
+    ? `BIND(EXISTS { ?person wdt:P39 wd:${heldQid} . } AS ?held)`
     : 'BIND(false AS ?held)';
   const bindings = await runSparql(`SELECT ?person (SAMPLE(?label) AS ?name) (SAMPLE(?desc) AS ?description)
        (MIN(?born) AS ?birth) (MAX(?died) AS ?death) (SAMPLE(?title) AS ?article) (SAMPLE(?img) AS ?image)
        (SAMPLE(?held) AS ?heldPosition) WHERE {
-  VALUES ?person { ${valuesList(validQids)} }
+  VALUES ?person { ${valuesList(qids)} }
   ?person wdt:P31 wd:Q5 .
   OPTIONAL { ?person rdfs:label ?label . FILTER(LANG(?label) = "en") }
   OPTIONAL { ?person schema:description ?desc . FILTER(LANG(?desc) = "en") }
@@ -573,5 +581,5 @@ export async function fetchPeople(qids: string[], positionQid: string | null): P
       heldPosition: b.heldPosition?.value === 'true',
     });
   }
-  return validQids.map((q) => byQid.get(q)).filter((p): p is PersonCandidate => !!p);
+  return byQid;
 }

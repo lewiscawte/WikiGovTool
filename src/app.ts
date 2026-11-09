@@ -12,6 +12,7 @@ import { authRouter } from './routes/auth';
 import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
 import { version } from './version';
+import { UpstreamRateLimitedError } from './services/upstream';
 
 export function createApp() {
   const app = express();
@@ -47,6 +48,10 @@ export function createApp() {
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(err);
+    if (err instanceof UpstreamRateLimitedError) {
+      res.status(503).set('Retry-After', String(err.retryAfterSeconds)).json({ error: 'Wikimedia is rate limiting this tool. Try again shortly.' });
+      return;
+    }
     res.status(500).json({ error: 'Internal server error' });
   });
 

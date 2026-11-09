@@ -103,7 +103,7 @@ wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
     if (plan.needsChoice) throw new EditInputError('Choose which position held statement to edit');
     if (plan.changes.length === 0) throw new EditInputError('Nothing to change: Wikidata already has these dates');
     const applied = await applyTermPlan(req, plan);
-    invalidateOfficeholderHistory();
+    await invalidateOfficeholderHistory(plan.positionQid);
     res.json({ ...applied, personQid: plan.personQid });
   } catch (err) {
     if (err instanceof EditInputError) res.status(400).json({ error: err.message });

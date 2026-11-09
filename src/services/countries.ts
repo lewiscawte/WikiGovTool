@@ -1,5 +1,6 @@
-import { config, userAgent } from '../config';
-import { TtlCache } from '../cache';
+import { config } from '../config';
+import { ReadThroughCache } from '../cache';
+import { upstreamJson } from './upstream';
 
 export interface CountryRef {
   qid: string;
@@ -8,8 +9,7 @@ export interface CountryRef {
 
 // Countries change far less often than officeholders, so this gets its own long-lived cache
 // rather than reusing the general-purpose cacheTtlMs.
-const COUNTRIES_TTL_MS = 24 * 60 * 60 * 1000;
-const countriesCache = new TtlCache<CountryRef[]>(COUNTRIES_TTL_MS);
+const countriesCache = new ReadThroughCache<CountryRef[]>('countries', { ttlMs: config.cacheCountriesTtlMs, staleMs: config.cacheStaleMs });
 const CACHE_KEY = 'sovereign-states';
 
 // The timeline starts in 1900 (EPOCH in public/shared.js), so states dissolved (P576) before
@@ -33,17 +33,12 @@ const COUNTRIES_QUERY = `SELECT ?country ?countryLabel WHERE {
 ORDER BY ?countryLabel`;
 
 export async function listCountries(): Promise<CountryRef[]> {
-  const cached = countriesCache.get(CACHE_KEY);
-  if (cached) return cached;
-
-  const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(COUNTRIES_QUERY)}&format=json`;
-  const res = await fetch(url, { headers: { 'User-Agent': userAgent(), Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`Wikidata request failed: ${res.status} ${res.statusText}`);
-  const data: any = await res.json();
-  const countries: CountryRef[] = (data.results?.bindings ?? []).map((b: any) => ({
-    qid: b.country.value.replace('http://www.wikidata.org/entity/', ''),
-    label: b.countryLabel?.value ?? '',
-  }));
-  countriesCache.set(CACHE_KEY, countries);
-  return countries;
+  return countriesCache.getOrFetch(CACHE_KEY, async () => {
+    const url = `${config.wikidataSparqlEndpoint}?query=${encodeURIComponent(COUNTRIES_QUERY)}&format=json`;
+    const data = await upstreamJson(url, 'Wikidata');
+    return (data.results?.bindings ?? []).map((b: any) => ({
+      qid: b.country.value.replace('http://www.wikidata.org/entity/', ''),
+      label: b.countryLabel?.value ?? '',
+    }));
+  });
 }
