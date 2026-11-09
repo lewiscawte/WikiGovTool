@@ -11,6 +11,14 @@ export const config = {
   // already exist and be active on Wikidata (Special:Tags), or the edit is rejected; empty = none.
   wikidataEditTags: process.env.WIKIDATA_EDIT_TAGS || '',
   cacheTtlMs: Number(process.env.CACHE_TTL_MS) || 15 * 60 * 1000,
+  cacheHistoryTtlMs: Number(process.env.CACHE_HISTORY_TTL_MS) || 6 * 60 * 60 * 1000,
+  cacheStructureTtlMs: Number(process.env.CACHE_STRUCTURE_TTL_MS) || 24 * 60 * 60 * 1000,
+  cacheCountriesTtlMs: Number(process.env.CACHE_COUNTRIES_TTL_MS) || 7 * 24 * 60 * 60 * 1000,
+  // 0 is meaningful here: never serve an expired entry.
+  cacheStaleMs: Number(process.env.CACHE_STALE_MS ?? 7 * 24 * 60 * 60 * 1000),
+  // Both are needed to use Redis; without them everything is cached in memory only.
+  redisUrl: process.env.REDIS_URL || '',
+  redisKeyPrefix: process.env.REDIS_KEY_PREFIX || '',
   oauth: {
     clientId: process.env.OAUTH_CLIENT_ID || '',
     clientSecret: process.env.OAUTH_CLIENT_SECRET || '',
