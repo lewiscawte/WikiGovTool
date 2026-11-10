@@ -196,18 +196,18 @@ const BUCKET_CLASSES: Array<{ qid: string; bucket: CabinetPosition['bucket'] }> 
   { qid: 'Q83307', bucket: 'Minister' },
 ];
 
-function buildCabinetPositionsQuery(countryQid: string): string {
-  // NB: Blazegraph (Wikidata Query Service's engine) does not support the SPARQL 1.1
-  // bounded-repeat property path syntax (`P279{0,4}`) — it 400s with a MalformedQueryException.
-  // Only unbounded `*`/`+`/`?` path operators are supported, so this has to stay unbounded.
-  return `SELECT ?position ?positionLabel ?class ?dept ?deptLabel WHERE {
-  VALUES ?class { ${BUCKET_CLASSES.map((c) => `wd:${c.qid}`).join(' ')} }
-  ?position wdt:P1001 wd:${countryQid} .
-  ?position wdt:P279* ?class .
-  OPTIONAL { ?position wdt:P2389 ?dept. }
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
-}
-LIMIT 200`;
+// Enough for the UK's ~220 executive offices with room to spare. Hitting it is logged.
+const MAX_CABINET_POSITIONS = 400;
+
+const subclassesCache = structureCache<string[]>('subclasses');
+
+// Every class at or below `classQid` in the P279 tree. These don't depend on the country, so
+// one fetch serves them all (about 70,000 QIDs across the three classes, a few seconds).
+function fetchSubclasses(classQid: string): Promise<string[]> {
+  return subclassesCache.getOrFetch(classQid, async () => {
+    const bindings = await runSparql(`SELECT DISTINCT ?sub WHERE { ?sub wdt:P279* wd:${classQid} . }`);
+    return bindings.map((b: any) => toQid(b.sub.value));
+  });
 }
 
 // Discovers a country's executive positions (head of state, head of government, ministers)
@@ -220,36 +220,55 @@ export async function fetchCabinetPositions(countryQid: string): Promise<Cabinet
   return cabinetPositionsCache.getOrFetch(countryQid, () => queryCabinetPositions(countryQid));
 }
 
+// Asking WDQS for "P1001 this country and P279* one of the classes" in one query took 40s to
+// over 60s for the UK. Fetching the country's classes (only items with a P279 can be in a
+// subclass tree; 744 for the UK, ~4s) and matching them against the shared subclass lists
+// here gives the same answer.
 async function queryCabinetPositions(countryQid: string): Promise<CabinetPosition[]> {
-  const bindings = await runSparql(buildCabinetPositionsQuery(countryQid));
+  const [subclassSets, candidates] = await Promise.all([
+    Promise.all(BUCKET_CLASSES.map(async (c) => new Set(await fetchSubclasses(c.qid)))),
+    runSparql(`SELECT DISTINCT ?position WHERE { ?position wdt:P1001 wd:${countryQid} ; wdt:P279 [] . }`),
+  ]);
 
-  const bucketRank = (classQid: string) => BUCKET_CLASSES.findIndex((c) => c.qid === classQid);
-  const best = new Map<string, { classQid: string; label: string; department: string | null }>();
-  for (const b of bindings) {
+  const matched: Array<{ qid: string; rank: number }> = [];
+  for (const b of candidates) {
     const qid = toQid(b.position.value);
-    const classQid = toQid(b.class.value);
-    if (bucketRank(classQid) === -1) continue;
-    const label = b.positionLabel?.value ?? qid;
-    const department = b.deptLabel?.value ?? null;
-    const existing = best.get(qid);
-    if (!existing || bucketRank(classQid) < bucketRank(existing.classQid)) {
-      best.set(qid, { classQid, label, department: department ?? existing?.department ?? null });
-    } else if (!existing.department && department) {
-      existing.department = department;
-    }
+    const rank = subclassSets.findIndex((set) => set.has(qid));
+    if (rank !== -1) matched.push({ qid, rank });
   }
 
-  const bucketNameRank = (bucket: CabinetPosition['bucket']) => BUCKET_CLASSES.findIndex((c) => c.bucket === bucket);
-
   // SPARQL result order is arbitrary (no ORDER BY) — sorting by bucket priority before the
-  // cap below is essential, not cosmetic: without it, a country with 40+ minister matches
+  // cap below is essential, not cosmetic: without it, a country with many minister matches
   // could silently push its single Head of State entry (e.g. a monarch) out of the slice
   // purely by chance ordering. This bit the UK: "Monarch of the United Kingdom" was being
   // discovered correctly but then dropped by an unprioritized cutoff.
-  return [...best.entries()]
-    .map(([qid, v]) => ({ qid, label: v.label, bucket: BUCKET_CLASSES[bucketRank(v.classQid)].bucket, department: v.department }))
-    .sort((a, b) => bucketNameRank(a.bucket) - bucketNameRank(b.bucket))
-    .slice(0, 100);
+  matched.sort((a, b) => a.rank - b.rank);
+  if (matched.length > MAX_CABINET_POSITIONS) {
+    console.log(`[cabinet] ${countryQid} has ${matched.length} executive offices; showing the first ${MAX_CABINET_POSITIONS}`);
+  }
+  const selected = matched.slice(0, MAX_CABINET_POSITIONS);
+  if (selected.length === 0) return [];
+
+  const bindings = await runSparql(`SELECT ?position ?positionLabel ?dept ?deptLabel WHERE {
+  VALUES ?position { ${valuesList(selected.map((m) => m.qid))} }
+  OPTIONAL { ?position wdt:P2389 ?dept. }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}`);
+  const details = new Map<string, { label: string; department: string | null }>();
+  for (const b of bindings) {
+    const qid = toQid(b.position.value);
+    const department = b.deptLabel?.value ?? null;
+    const existing = details.get(qid);
+    if (!existing) details.set(qid, { label: b.positionLabel?.value ?? qid, department });
+    else if (!existing.department && department) existing.department = department;
+  }
+
+  return selected.map(({ qid, rank }) => ({
+    qid,
+    label: details.get(qid)?.label ?? qid,
+    bucket: BUCKET_CLASSES[rank].bucket,
+    department: details.get(qid)?.department ?? null,
+  }));
 }
 
 export interface DeputyPair {
