@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  fetchCabinetPositions,
   fetchDeputyPairs,
   fetchOfficeholderHistory,
   fetchPositionLifespans,
@@ -72,6 +73,57 @@ test('deputy pairs are limited to offices in the requested set, even when cached
     { seniorQid: 'Q141', juniorQid: 'Q142' },
   ]);
   assert.deepEqual(requestedQids(fetchMock.mock.calls[1]), ['Q142']);
+});
+
+// A small stand-in for Wikidata's class tree and two countries' offices. Q900 is both a head of
+// state and a head of government; Q999 has P1001 but isn't an executive office.
+const SUBCLASSES: Record<string, string[]> = {
+  Q48352: ['Q48352', 'Q900', 'Q1100'],
+  Q2285706: ['Q2285706', 'Q901', 'Q900'],
+  Q83307: ['Q83307', 'Q902', ...Array.from({ length: 450 }, (_, i) => `Q${2000 + i}`)],
+};
+const COUNTRY_OFFICES: Record<string, string[]> = {
+  Q5000: ['Q999', 'Q902', 'Q901', 'Q900'],
+  // A head of state listed after more ministers than the cap allows.
+  Q5001: [...Array.from({ length: 450 }, (_, i) => `Q${2000 + i}`), 'Q1100'],
+};
+
+function stubCabinetSparql() {
+  return mock.method(globalThis, 'fetch', async (url: string) => {
+    const query = decodeURIComponent(String(url));
+    const closure = query.match(/wdt:P279\* wd:(Q\d+)/);
+    if (closure) return sparqlBody(SUBCLASSES[closure[1]].map((q) => ({ sub: entity(q) })));
+    const country = query.match(/wdt:P1001 wd:(Q\d+)/);
+    if (country) return sparqlBody(COUNTRY_OFFICES[country[1]].map((q) => ({ position: entity(q) })));
+    return sparqlBody(requestedQids({ arguments: [url] }).map((q) => ({
+      position: entity(q),
+      positionLabel: { value: `Office ${q}` },
+      ...(q === 'Q902' ? { dept: entity('Q7000'), deptLabel: { value: 'Ministry of Q902' } } : {}),
+    })));
+  });
+}
+
+const isClosureQuery = (call: { arguments: unknown[] }) => /wdt:P279\*/.test(decodeURIComponent(String(call.arguments[0])));
+
+test('cabinet positions are the country offices in an executive class, best bucket first', async () => {
+  stubCabinetSparql();
+  const positions = await fetchCabinetPositions('Q5000');
+  assert.deepEqual(positions, [
+    { qid: 'Q900', label: 'Office Q900', bucket: 'Head of State', department: null },
+    { qid: 'Q901', label: 'Office Q901', bucket: 'Head of Government', department: null },
+    { qid: 'Q902', label: 'Office Q902', bucket: 'Minister', department: 'Ministry of Q902' },
+  ]);
+});
+
+test('cabinet positions keep heads of state over ministers when capped at 400, without refetching class lists', async () => {
+  const fetchMock = stubCabinetSparql();
+  await fetchCabinetPositions('Q5000');
+  const before = fetchMock.mock.calls.filter(isClosureQuery).length;
+
+  const positions = await fetchCabinetPositions('Q5001');
+  assert.equal(positions.length, 400);
+  assert.deepEqual(positions[0], { qid: 'Q1100', label: 'Office Q1100', bucket: 'Head of State', department: null });
+  assert.equal(fetchMock.mock.calls.filter(isClosureQuery).length, before);
 });
 
 test('lifespans are returned as a new map each call', async () => {
