@@ -1,4 +1,5 @@
 import { userAgent } from '../config';
+import { chargeUpstreamLookup } from '../middleware/clientLimit';
 
 const DEFAULT_BACKOFF_SECONDS = 60;
 
@@ -16,6 +17,7 @@ export async function upstreamJson(url: string, source: string): Promise<any> {
   const host = new URL(url).host;
   const until = blockedUntil.get(host) ?? 0;
   if (Date.now() < until) throw new UpstreamRateLimitedError(host, Math.ceil((until - Date.now()) / 1000));
+  chargeUpstreamLookup();
 
   const startedAt = Date.now();
   const res = await fetch(url, { headers: { 'User-Agent': userAgent(), Accept: 'application/json' } });

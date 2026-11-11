@@ -13,13 +13,19 @@ import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
 import { version } from './version';
 import { UpstreamRateLimitedError } from './services/upstream';
+import { ClientRateLimitedError, trackClient } from './middleware/clientLimit';
 
 export function createApp() {
   const app = express();
 
+  // Toolforge has two proxies in front of the app (front proxy, then Kubernetes ingress), so
+  // the client's address is the one they recorded in X-Forwarded-For.
+  app.set('trust proxy', 2);
+
   // No CORS middleware: the frontend is served from this same origin, and allowing credentialed
   // cross-origin requests would leave SameSite=Lax as the only guard on Wikidata edits.
   app.use(express.json());
+  app.use(trackClient);
   app.use(
     session({
       secret: config.sessionSecret,
@@ -47,6 +53,10 @@ export function createApp() {
   });
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof ClientRateLimitedError) {
+      res.status(429).set('Retry-After', String(err.retryAfterSeconds)).json({ error: 'Too many lookups. Try again shortly.' });
+      return;
+    }
     console.error(err);
     if (err instanceof UpstreamRateLimitedError) {
       res.status(503).set('Retry-After', String(err.retryAfterSeconds)).json({ error: 'Wikimedia is rate limiting this tool. Try again shortly.' });
