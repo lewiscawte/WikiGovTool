@@ -16,7 +16,10 @@ const historyCache = persistent<PositionHistoryRow[]>('history', config.cacheHis
 const cabinetPositionsCache = structureCache<CabinetPosition[]>('cabinet');
 const lifespanCache = structureCache<PositionLifespan>('lifespan');
 const deputiesCache = structureCache<string[]>('deputies');
-const entityCache = new ReadThroughCache<unknown | null>('entity', { ttlMs: config.cacheTtlMs, memoryOnly: true });
+// Whole Wikidata items can each be megabytes, and any visitor can ask for any item, so this
+// cache is bounded by size as well as by entry count.
+const ENTITY_CACHE_BYTES = 32 * 1024 * 1024;
+const entityCache = new ReadThroughCache<unknown | null>('entity', { ttlMs: config.cacheTtlMs, memoryOnly: true, maxBytes: ENTITY_CACHE_BYTES });
 const entitySearchCache = new ReadThroughCache<EntitySearchResult[]>('entity-search', { ttlMs: SEARCH_TTL_MS, memoryOnly: true });
 const peopleCache = new ReadThroughCache<PersonCandidate | null>('people', { ttlMs: SEARCH_TTL_MS, memoryOnly: true });
 

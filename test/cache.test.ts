@@ -267,3 +267,17 @@ test('TtlCache honours a per-entry TTL', () => {
   mock.timers.tick(2 * MINUTE);
   assert.equal(cache.get('short'), undefined);
 });
+
+test('TtlCache with a byte budget evicts the oldest entries to stay under it', () => {
+  const cache = new TtlCache<string>(HOUR, 2000, 1000);
+  for (const key of 'abcdefghij') cache.set(key, key.repeat(300));
+  const kept = [...'abcdefghij'].filter((key) => cache.get(key) !== undefined);
+  assert.ok(kept.length <= 3, `kept ${kept.length} entries of ~300 bytes under a 1,000-byte budget`);
+  assert.ok(kept.includes('j'), 'the newest entry is kept');
+});
+
+test('TtlCache does not keep a single value larger than its byte budget', () => {
+  const cache = new TtlCache<string>(HOUR, 2000, 1000);
+  cache.set('big', 'x'.repeat(5000));
+  assert.equal(cache.get('big'), undefined);
+});
