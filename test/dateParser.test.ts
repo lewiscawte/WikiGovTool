@@ -19,3 +19,17 @@ test('normalizeDate still reads dates written with wikilinks', () => {
   assert.equal(normalizeDate('[[January 20|20 January]] 2025'), '2025-01-20');
   assert.equal(normalizeDate('[[Category:X|July]] 4, 1776'), '1776-07-04');
 });
+
+test('normalizeDate matches month names in linear time on long runs of letters', () => {
+  for (const payload of ['a'.repeat(40000) + ' 2020', 'a'.repeat(40000) + '!']) {
+    const ms = timed(() => normalizeDate(payload));
+    assert.ok(ms < 50, `${payload.length}-character run took ${ms.toFixed(0)} ms`);
+  }
+});
+
+test('normalizeDate still reads month-name dates', () => {
+  assert.equal(normalizeDate('January 20, 2025'), '2025-01-20');
+  assert.equal(normalizeDate('March 2019'), '2019-03-01');
+  assert.equal(normalizeDate('5July 4, 1776'), '1776-07-04');
+  assert.equal(normalizeDate('Septembers 4, 2020'), 'Septembers 4, 2020');
+});

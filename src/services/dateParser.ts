@@ -72,7 +72,8 @@ function parseDateString(s: string): string | null {
     return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
   }
 
-  // Format like "5 July 1995" or "July 5, 1995"
+  // Format like "5 July 1995" or "July 5, 1995". The month patterns only start at the beginning
+  // of a run of letters; without that they were quadratic on a long run of letters.
   const dayMonthYear = cleaned.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
   if (dayMonthYear) {
     const day = dayMonthYear[1].padStart(2, '0');
@@ -82,7 +83,7 @@ function parseDateString(s: string): string | null {
     if (month) return `${year}-${month}-${day}`;
   }
 
-  const monthDayYear = cleaned.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+  const monthDayYear = cleaned.match(/(?<![A-Za-z])([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
   if (monthDayYear) {
     const monthName = monthDayYear[1].toLowerCase();
     const day = monthDayYear[2].padStart(2, '0');
@@ -92,7 +93,7 @@ function parseDateString(s: string): string | null {
   }
 
   // Just month and year
-  const monthYear = cleaned.match(/([A-Za-z]+)\s+(\d{4})/);
+  const monthYear = cleaned.match(/(?<![A-Za-z])([A-Za-z]+)\s+(\d{4})/);
   if (monthYear) {
     const monthName = monthYear[1].toLowerCase();
     const year = monthYear[2];
