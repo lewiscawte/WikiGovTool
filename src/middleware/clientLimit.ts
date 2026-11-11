@@ -19,15 +19,32 @@ const buckets = new TtlCache<Bucket>((BURST / REFILL_PER_SECOND) * 1000, MAX_TRA
 const currentClient = new AsyncLocalStorage<string>();
 
 export class ClientRateLimitedError extends Error {
+  // Read by ReadThroughCache: another request waiting on the same lookup fetches for itself
+  // rather than failing with this client's limit.
+  readonly onlyAffectsCaller = true;
+
   constructor(public retryAfterSeconds: number) {
     super(`Too many lookups from this client; retry in ${retryAfterSeconds}s`);
   }
 }
 
-// Runs the rest of the request with the client's address as its identity (req.ip honours the
-// app's trust proxy setting).
+// One IPv6 user typically controls a whole /64, so IPv6 addresses are grouped by it; an
+// IPv4-mapped IPv6 address counts as the IPv4 address.
+export function clientKey(ip: string): string {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return mapped[1];
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('%')[0].split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left;
+  return `${groups.slice(0, 4).map((g) => parseInt(g || '0', 16).toString(16)).join(':')}::/64`;
+}
+
+// Runs the rest of the request with the client as its identity (req.ip honours the app's
+// trust proxy setting).
 export function trackClient(req: Request, _res: Response, next: NextFunction): void {
-  currentClient.run(req.ip ?? 'unknown', next);
+  currentClient.run(clientKey(req.ip ?? 'unknown'), next);
 }
 
 // Takes one Wikimedia lookup from the current client's allowance. Work outside a request,
