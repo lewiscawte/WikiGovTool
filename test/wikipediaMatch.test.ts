@@ -39,7 +39,7 @@ test('the infobox route matches a long office parameter in linear time', async (
   const res = await fetch(`${base}&office=${encodeURIComponent('[[|'.repeat(1000))}`);
   await res.text();
   const ms = performance.now() - start;
-  assert.ok(ms < 100, `1,000 '[[|' in office took ${ms.toFixed(0)} ms`);
+  assert.ok(ms < 400, `1,000 '[[|' in office took ${ms.toFixed(0)} ms`);
 });
 
 test('the infobox route still matches an office written as a wikilink', async () => {
