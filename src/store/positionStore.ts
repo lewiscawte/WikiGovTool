@@ -1,5 +1,6 @@
 import { POSITION_SEEDS } from '../data/positions';
 import { PositionSeed } from '../types';
+import { checkRoom, checkTextLength } from './limits';
 
 // In-memory only: modifications made via PUT /api/positions/:id/link reset on restart.
 // Wikidata/Wikipedia remain the source of truth for everything else (reads go live).
@@ -16,6 +17,8 @@ export function getPosition(id: string): PositionSeed | undefined {
 // User-created office stub — no Wikidata item yet (wikidataQid is null until someone links
 // or creates one). In-memory only, like everything else here.
 export function addPosition(seed: PositionSeed): void {
+  checkTextLength({ title: seed.title, department: seed.department, wikipediaTitle: seed.wikipediaTitle });
+  if (!positions.has(seed.id)) checkRoom(positions.size - POSITION_SEEDS.length, 'offices');
   positions.set(seed.id, seed);
 }
 

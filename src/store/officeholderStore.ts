@@ -2,6 +2,8 @@
 // Wikidata records no holder for. Keyed by the office's Wikidata QID, or its local id for an
 // office with no Wikidata item. Reset on restart; nothing is written to Wikidata.
 
+import { checkRoom } from './limits';
+
 export interface LocalOfficeholder {
   personQid: string;
   personName: string;
@@ -16,11 +18,16 @@ export interface LocalOfficeholder {
 }
 
 const officeholdersByPosition = new Map<string, LocalOfficeholder[]>();
+let total = 0;
 
 export function addLocalOfficeholder(positionKey: string, holder: LocalOfficeholder): void {
-  const list = (officeholdersByPosition.get(positionKey) ?? []).filter((h) => h.personQid !== holder.personQid);
+  const existing = officeholdersByPosition.get(positionKey) ?? [];
+  const list = existing.filter((h) => h.personQid !== holder.personQid);
+  // Re-picking the same person for an office replaces the earlier fill, so needs no room.
+  if (list.length === existing.length) checkRoom(total, 'officeholders');
   list.push(holder);
   officeholdersByPosition.set(positionKey, list);
+  total += list.length - existing.length;
 }
 
 // The most recently added fill whose window covers `date`.
