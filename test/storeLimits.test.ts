@@ -53,20 +53,25 @@ const dept = (qid: string, label = 'Department') => ({
 test('departmentStore stops accepting new departments once full', () => {
   assert.throws(() => {
     for (let i = 0; i < 5000; i++) addExtraDepartment(`Q${2000 + (i % 5)}`, dept(`local-dept-cap-${i}`));
-  });
+  }, isFull);
   const total = [0, 1, 2, 3, 4].reduce((n, k) => n + listExtraDepartments(`Q${2000 + k}`).length, 0);
   assert.ok(total <= 1000, `store holds ${total}`);
 });
 
 test('departmentStore stops accepting new overrides once full, but still updates existing ones', () => {
   setDepartmentOverride('local-kept', { label: 'Before' });
+  let accepted = 0;
   assert.throws(() => {
-    for (let i = 0; i < 5000; i++) setDepartmentOverride(`local-override-cap-${i}`, { label: 'x' });
-  });
+    for (let i = 0; i < 5000; i++) {
+      setDepartmentOverride(`local-override-cap-${i}`, { label: 'x' });
+      accepted++;
+    }
+  }, isFull);
+  assert.ok(accepted <= MAX_ENTRIES_PER_STORE, `accepted ${accepted} overrides`);
   assert.doesNotThrow(() => setDepartmentOverride('local-kept', { label: 'After' }));
 });
 
 test('departments reject over-long text', () => {
-  assert.throws(() => addExtraDepartment('Q145', dept('local-long', 'x'.repeat(90000))));
-  assert.throws(() => setDepartmentOverride('Q1', { dissolved: 'x'.repeat(90000) }));
+  assert.throws(() => addExtraDepartment('Q145', dept('local-long', 'x'.repeat(90000))), isTooLong);
+  assert.throws(() => setDepartmentOverride('Q1', { dissolved: 'x'.repeat(90000) }), isTooLong);
 });
