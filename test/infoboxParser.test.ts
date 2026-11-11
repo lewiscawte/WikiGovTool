@@ -50,3 +50,30 @@ test('cleanWikitextValue strips wikilinks, bold markup and refs down to display 
 test('extractTemplate returns null when no matching template exists', () => {
   assert.equal(extractTemplate('no templates here', /Infobox\s+officeholder/i), null);
 });
+
+const timed = (fn: () => void): number => {
+  const start = performance.now();
+  fn();
+  return performance.now() - start;
+};
+
+// Article wikitext is editable by anyone, and a slow parse blocks every user's requests.
+test('cleanWikitextValue strips refs in linear time, even when they never close', () => {
+  const ms = timed(() => cleanWikitextValue('<ref>'.repeat(20000)));
+  assert.ok(ms < 100, `20,000 unclosed <ref> took ${ms.toFixed(0)} ms`);
+});
+
+test('cleanWikitextValue removes paired and self-closing refs', () => {
+  assert.equal(cleanWikitextValue('Treasury<ref name="a">Cited, p. 4</ref> and<ref name="b" /> State'), 'Treasury and State');
+  assert.equal(cleanWikitextValue('Treasury<REF>x</REF>'), 'Treasury');
+});
+
+test('cleanWikitextValue unwraps wikilinks in linear time, even when they never close', () => {
+  const ms = timed(() => cleanWikitextValue('[['.repeat(10000)));
+  assert.ok(ms < 100, `10,000 unclosed [[ took ${ms.toFixed(0)} ms`);
+});
+
+test('cleanWikitextValue keeps the text after the first pipe, as MediaWiki displays it', () => {
+  assert.equal(cleanWikitextValue('[[A|B|C]] and [[|D]] and [[E|]] and [[F]]'), 'B|C and D and E| and F');
+  assert.equal(cleanWikitextValue('[[a]b]] [[]] [[x'), '[[a]b]] [[]] [[x');
+});
