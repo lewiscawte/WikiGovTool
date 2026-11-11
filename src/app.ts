@@ -13,6 +13,10 @@ import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
 import { version } from './version';
 import { UpstreamRateLimitedError } from './services/upstream';
+import { BoundedSessionStore } from './sessionStore';
+
+// Logged-in sessions last a day; after that the user logs in with Wikimedia again.
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export function createApp() {
   const app = express();
@@ -25,7 +29,8 @@ export function createApp() {
       secret: config.sessionSecret,
       resave: false,
       saveUninitialized: false,
-      cookie: { httpOnly: true, sameSite: 'lax' },
+      store: new BoundedSessionStore(SESSION_MAX_AGE_MS),
+      cookie: { httpOnly: true, sameSite: 'lax', maxAge: SESSION_MAX_AGE_MS },
     }),
   );
 
