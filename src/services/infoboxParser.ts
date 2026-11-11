@@ -67,10 +67,36 @@ export function parseTemplateFields(templateBlock: string): Record<string, strin
 
 import { normalizeDate } from './dateParser';
 
+// Removes <ref>…</ref> and self-closing <ref/> tags. A regex for this backtracks
+// quadratically on unclosed tags, and article text is editable by anyone, so each tag is
+// found with forward searches instead. An unclosed <ref> is left as text, as before.
+function stripRefs(value: string): string {
+  const lower = value.toLowerCase();
+  let out = '';
+  let pos = 0;
+  let closingTagsLeft = true;
+  while (pos < value.length) {
+    const open = lower.indexOf('<ref', pos);
+    if (open === -1) break;
+    const tagEnd = lower.indexOf('>', open);
+    if (tagEnd === -1) break;
+    out += value.slice(pos, open);
+    pos = tagEnd + 1;
+    if (lower[tagEnd - 1] === '/') continue;
+    const close = closingTagsLeft ? lower.indexOf('</ref>', pos) : -1;
+    if (close === -1) {
+      // No later </ref> exists, so no later tag can close either.
+      closingTagsLeft = false;
+      out += value.slice(open, pos);
+    } else {
+      pos = close + '</ref>'.length;
+    }
+  }
+  return out + value.slice(pos);
+}
+
 export function cleanWikitextValue(value: string): string {
-  let cleaned = value
-    .replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, '')
-    .replace(/<ref[^>]*\/>/gi, '')
+  let cleaned = stripRefs(value)
     .replace(/\{\{efn[^{}]*\}\}/gi, '')
     .replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1')
     .replace(/'''?/g, '')
