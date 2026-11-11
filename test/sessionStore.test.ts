@@ -53,3 +53,14 @@ test('a flood of pending sessions does not push out logged-in users', () => {
   store.get('logged-in', (_err, sess) => assert.equal(sess?.user?.username, 'Example'));
   store.get('pending-0', (_err, sess) => assert.equal(sess, null));
 });
+
+// A request still in flight when the user logs out ends with touch(); that must not bring the
+// session back.
+test('touch does not recreate a destroyed session', () => {
+  const store = new BoundedSessionStore(60_000);
+  const sess = { cookie: { originalMaxAge: 60_000, httpOnly: true, path: '/' }, user: { username: 'Example', loggedInAt: '2026-11-11' } } as any;
+  store.set('sid', sess);
+  store.destroy('sid');
+  store.touch('sid', sess);
+  store.get('sid', (_err, found) => assert.equal(found, null));
+});

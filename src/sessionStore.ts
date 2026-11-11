@@ -36,8 +36,13 @@ export class BoundedSessionStore extends session.Store {
     callback?.();
   }
 
-  // Called on requests that don't change the session; restarts its expiry.
+  // Called on requests that don't change the session; restarts its expiry. Only for a session
+  // that's still stored, so a request finishing after logout can't bring it back.
   touch(sid: string, sess: SessionData, callback?: () => void): void {
+    if (this.loggedIn.get(sid) === undefined && this.pending.get(sid) === undefined) {
+      callback?.();
+      return;
+    }
     this.set(sid, sess, () => callback?.());
   }
 
