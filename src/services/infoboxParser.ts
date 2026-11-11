@@ -66,6 +66,7 @@ export function parseTemplateFields(templateBlock: string): Record<string, strin
 }
 
 import { normalizeDate } from './dateParser';
+import { unwrapWikilinks } from './wikitext';
 
 // Removes <ref>…</ref> and self-closing <ref/> tags. A regex for this backtracks
 // quadratically on unclosed tags, and article text is editable by anyone, so each tag is
@@ -96,9 +97,7 @@ function stripRefs(value: string): string {
 }
 
 export function cleanWikitextValue(value: string): string {
-  let cleaned = stripRefs(value)
-    .replace(/\{\{efn[^{}]*\}\}/gi, '')
-    .replace(/\[\[(?:[^\]|]*\|)?([^\]]+)\]\]/g, '$1')
+  let cleaned = unwrapWikilinks(stripRefs(value).replace(/\{\{efn[^{}]*\}\}/gi, ''))
     .replace(/'''?/g, '')
     .replace(/<br\s*\/?>/gi, ', ')
     .replace(/\s+/g, ' ')

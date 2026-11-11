@@ -67,3 +67,13 @@ test('cleanWikitextValue removes paired and self-closing refs', () => {
   assert.equal(cleanWikitextValue('Treasury<ref name="a">Cited, p. 4</ref> and<ref name="b" /> State'), 'Treasury and State');
   assert.equal(cleanWikitextValue('Treasury<REF>x</REF>'), 'Treasury');
 });
+
+test('cleanWikitextValue unwraps wikilinks in linear time, even when they never close', () => {
+  const ms = timed(() => cleanWikitextValue('[['.repeat(10000)));
+  assert.ok(ms < 100, `10,000 unclosed [[ took ${ms.toFixed(0)} ms`);
+});
+
+test('cleanWikitextValue keeps the text after the first pipe, as MediaWiki displays it', () => {
+  assert.equal(cleanWikitextValue('[[A|B|C]] and [[|D]] and [[E|]] and [[F]]'), 'B|C and D and E| and F');
+  assert.equal(cleanWikitextValue('[[a]b]] [[]] [[x'), '[[a]b]] [[]] [[x');
+});
