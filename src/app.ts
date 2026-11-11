@@ -13,6 +13,7 @@ import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
 import { version } from './version';
 import { UpstreamRateLimitedError } from './services/upstream';
+import { StoreLimitError } from './store/limits';
 import { BoundedSessionStore } from './sessionStore';
 
 // Logged-in sessions last a day; after that the user logs in with Wikimedia again.
@@ -52,6 +53,10 @@ export function createApp() {
   });
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof StoreLimitError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
     console.error(err);
     if (err instanceof UpstreamRateLimitedError) {
       res.status(503).set('Retry-After', String(err.retryAfterSeconds)).json({ error: 'Wikimedia is rate limiting this tool. Try again shortly.' });
