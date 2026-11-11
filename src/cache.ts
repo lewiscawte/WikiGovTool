@@ -3,27 +3,41 @@ import { redisStore } from './redisStore';
 const DEFAULT_MAX_ENTRIES = 2000;
 
 export class TtlCache<V> {
-  private store = new Map<string, { value: V; expiresAt: number }>();
+  private store = new Map<string, { value: V; expiresAt: number; bytes: number }>();
+  private totalBytes = 0;
 
-  constructor(private ttlMs: number, private maxEntries = DEFAULT_MAX_ENTRIES) {}
+  // maxBytes bounds the total size of the cached values, estimated from their JSON length, for
+  // caches whose values vary a lot in size; otherwise only the entry count is bounded.
+  constructor(private ttlMs: number, private maxEntries = DEFAULT_MAX_ENTRIES, private maxBytes = Infinity) {}
 
   get(key: string): V | undefined {
     const hit = this.store.get(key);
     if (!hit) return undefined;
+    if (Date.now() > hit.expiresAt) {
+      this.delete(key);
+      return undefined;
+    }
     this.store.delete(key);
-    if (Date.now() > hit.expiresAt) return undefined;
     // Map keeps insertion order, so re-inserting makes the oldest key the least recently used.
     this.store.set(key, hit);
     return hit.value;
   }
 
   set(key: string, value: V, ttlMs = this.ttlMs): void {
-    this.store.delete(key);
-    this.store.set(key, { value, expiresAt: Date.now() + ttlMs });
-    if (this.store.size > this.maxEntries) this.store.delete(this.store.keys().next().value as string);
+    this.delete(key);
+    const bytes = this.maxBytes === Infinity ? 0 : (JSON.stringify(value)?.length ?? 0);
+    if (bytes > this.maxBytes) return;
+    this.store.set(key, { value, expiresAt: Date.now() + ttlMs, bytes });
+    this.totalBytes += bytes;
+    while (this.store.size > this.maxEntries || this.totalBytes > this.maxBytes) {
+      this.delete(this.store.keys().next().value as string);
+    }
   }
 
   delete(key: string): void {
+    const hit = this.store.get(key);
+    if (!hit) return;
+    this.totalBytes -= hit.bytes;
     this.store.delete(key);
   }
 }
@@ -63,6 +77,7 @@ interface ReadThroughOptions {
   // How long past ttlMs an entry may still be served while it's refreshed in the background.
   staleMs?: number;
   maxEntries?: number;
+  maxBytes?: number;
   remote?: RemoteStore | null;
   // For data with no value after a restart, or too short-lived to be worth a network hop.
   memoryOnly?: boolean;
@@ -81,7 +96,7 @@ export class ReadThroughCache<V> {
   constructor(private namespace: string, options: ReadThroughOptions) {
     this.ttlMs = options.ttlMs;
     this.staleMs = options.staleMs ?? 0;
-    this.memory = new TtlCache(options.ttlMs + this.staleMs, options.maxEntries);
+    this.memory = new TtlCache(options.ttlMs + this.staleMs, options.maxEntries, options.maxBytes);
     this.remote = options.memoryOnly ? null : options.remote === undefined ? redisStore : options.remote;
   }
 
