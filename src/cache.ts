@@ -122,7 +122,8 @@ export class ReadThroughCache<V> {
 
     const toFetch = missing.filter((id) => !this.inFlight.has(id));
     if (toFetch.length > 0) this.startFetch(toFetch, fetchMissing);
-    const fetched = await Promise.all(missing.map(async (id) => [id, await this.inFlight.get(id)] as const));
+    const startedHere = new Set(toFetch);
+    const fetched = await Promise.all(missing.map(async (id) => [id, await this.awaitFetch(id, startedHere.has(id), fetchMissing)] as const));
     for (const [id, batch] of fetched) {
       if (batch?.has(id)) result.set(id, batch.get(id) as V);
     }
@@ -148,6 +149,22 @@ export class ReadThroughCache<V> {
 
   private remoteKey(id: string): string {
     return `${SCHEMA_VERSION}:${this.namespace}:${id}`;
+  }
+
+  // Waits for the in-flight fetch of `id`. A fetch another request started can fail for a
+  // reason that only applies to that request, such as its client's rate limit; this request
+  // then fetches for itself instead of taking on that error.
+  private async awaitFetch(
+    id: string,
+    startedHere: boolean,
+    fetchMissing: (missing: string[]) => Promise<Map<string, V>>,
+  ): Promise<Map<string, V> | undefined> {
+    try {
+      return await this.inFlight.get(id);
+    } catch (err) {
+      if (startedHere || !(err as { onlyAffectsCaller?: boolean } | null)?.onlyAffectsCaller) throw err;
+      return this.inFlight.get(id) ?? this.startFetch([id], fetchMissing);
+    }
   }
 
   private startFetch(ids: string[], fetchMissing: (missing: string[]) => Promise<Map<string, V>>): Promise<Map<string, V>> {
