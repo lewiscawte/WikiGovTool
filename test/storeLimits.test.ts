@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { addPosition, listPositions } from '../src/store/positionStore';
 import { addExtraPosition, listExtraPositions } from '../src/store/extraPositionsStore';
 import { addLocalOfficeholder } from '../src/store/officeholderStore';
+import { addExtraDepartment, listExtraDepartments, setDepartmentOverride } from '../src/store/departmentStore';
 
 const stub = (id: string, title = 'Office') => ({ id, title, department: 'Dept', wikipediaTitle: '', wikidataQid: null });
 const holder = (personQid: string) => ({
@@ -35,4 +36,29 @@ test('officeholderStore stops accepting new fills once full', () => {
 test('office stubs reject over-long text', () => {
   assert.throws(() => addPosition(stub('local-long', 'x'.repeat(90000))));
   assert.throws(() => addExtraPosition('Q145', stub('local-long-2', 'x'.repeat(90000))));
+});
+
+const dept = (qid: string, label = 'Department') => ({
+  qid, label, wikipediaTitle: null, inception: null, dissolved: null, heads: [], offices: [], vacant: [],
+});
+
+test('departmentStore stops accepting new departments once full', () => {
+  assert.throws(() => {
+    for (let i = 0; i < 5000; i++) addExtraDepartment(`Q${2000 + (i % 5)}`, dept(`local-dept-cap-${i}`));
+  });
+  const total = [0, 1, 2, 3, 4].reduce((n, k) => n + listExtraDepartments(`Q${2000 + k}`).length, 0);
+  assert.ok(total <= 1000, `store holds ${total}`);
+});
+
+test('departmentStore stops accepting new overrides once full, but still updates existing ones', () => {
+  setDepartmentOverride('local-kept', { label: 'Before' });
+  assert.throws(() => {
+    for (let i = 0; i < 5000; i++) setDepartmentOverride(`local-override-cap-${i}`, { label: 'x' });
+  });
+  assert.doesNotThrow(() => setDepartmentOverride('local-kept', { label: 'After' }));
+});
+
+test('departments reject over-long text', () => {
+  assert.throws(() => addExtraDepartment('Q145', dept('local-long', 'x'.repeat(90000))));
+  assert.throws(() => setDepartmentOverride('Q1', { dissolved: 'x'.repeat(90000) }));
 });
