@@ -1,3 +1,5 @@
+import { stripTags, unwrapWikilinks } from './wikitext';
+
 const MONTHS: Record<string, string> = {
   january: '01',
   february: '02',
@@ -62,7 +64,7 @@ function parseDateFromTemplate(wikitext: string): string | null {
 }
 
 function parseDateString(s: string): string | null {
-  const cleaned = s.replace(/<[^>]+>/g, '').replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1').replace(/\[\[([^\]]+)\]\]/g, '$1').trim();
+  const cleaned = unwrapWikilinks(stripTags(s), 'last').trim();
   
   // Already ISO format YYYY-MM-DD
   const isoMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);

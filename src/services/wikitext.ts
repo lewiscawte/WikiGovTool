@@ -30,6 +30,30 @@ export function unwrapWikilinks(text: string, labelAfter: 'first' | 'last' = 'fi
   return out + text.slice(pos);
 }
 
+// Removes HTML-like tags (`<` … `>` with something between) in one forward pass; the
+// /<[^>]+>/g regex this replaces is quadratic on a long run of "<" with no ">".
+export function stripTags(text: string): string {
+  let out = '';
+  let pos = 0;
+  let nextClose = -1;
+  for (;;) {
+    const open = text.indexOf('<', pos);
+    if (open === -1) break;
+    if (nextClose <= open) {
+      nextClose = text.indexOf('>', open + 1);
+      if (nextClose === -1) break;
+    }
+    if (nextClose > open + 1) {
+      out += text.slice(pos, open);
+      pos = nextClose + 1;
+    } else {
+      out += text.slice(pos, open + 1);
+      pos = open + 1;
+    }
+  }
+  return out + text.slice(pos);
+}
+
 function linkLabel(inner: string, labelAfter: 'first' | 'last'): string {
   if (labelAfter === 'first') {
     const pipe = inner.indexOf('|');
