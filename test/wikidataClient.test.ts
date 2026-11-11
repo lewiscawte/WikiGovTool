@@ -5,6 +5,7 @@ import {
   fetchDeputyPairs,
   fetchOfficeholderHistory,
   fetchPositionLifespans,
+  getEntity,
   invalidateOfficeholderHistory,
 } from '../src/services/wikidataClient';
 
@@ -132,4 +133,17 @@ test('lifespans are returned as a new map each call', async () => {
   first.delete('Q151');
   const second = await fetchPositionLifespans(['Q151']);
   assert.equal(second.get('Q151')?.inception, '1900-01-01T00:00:00Z');
+});
+
+// GET /api/wikidata/entity/:qid is unauthenticated, so distinct large items must not pile up.
+test('getEntity bounds cached entities by size, not only by count', async () => {
+  const filler = 'x'.repeat(200_000);
+  const fetchMock = mock.method(globalThis, 'fetch', async (url: string) => {
+    const qid = new URL(String(url)).searchParams.get('ids')!;
+    return new Response(JSON.stringify({ entities: { [qid]: { id: qid, filler } } }));
+  });
+  for (let i = 1; i <= 300; i++) await getEntity(`Q${700000 + i}`);
+  const calls = fetchMock.mock.callCount();
+  await getEntity('Q700001');
+  assert.equal(fetchMock.mock.callCount(), calls + 1, 'the oldest of 300 × 200 kB entities should have been evicted');
 });
