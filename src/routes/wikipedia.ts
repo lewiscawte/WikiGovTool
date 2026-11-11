@@ -1,14 +1,12 @@
 import { Router } from 'express';
 import { fetchArticle } from '../services/wikipediaClient';
 import { cleanWikitextValue, extractTemplate, parseTemplateFields } from '../services/infoboxParser';
+import { unwrapWikilinks } from '../services/wikitext';
 
 export const wikipediaRouter = Router();
 
 function normalizeForMatch(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1')
-    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+  return unwrapWikilinks(s.toLowerCase(), 'last')
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
