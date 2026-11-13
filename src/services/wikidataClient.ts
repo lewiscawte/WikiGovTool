@@ -1,6 +1,7 @@
 import { config } from '../config';
 import { ReadThroughCache } from '../cache';
 import { upstreamJson } from './upstream';
+import { withRecentTermEdits } from '../store/recentTermEdits';
 
 const QID_RE = /^Q[1-9]\d*$/;
 const ENTITY_URI_PREFIX = 'http://www.wikidata.org/entity/';
@@ -52,6 +53,30 @@ export function invalidateOfficeholderHistory(positionQid: string): Promise<void
   return historyCache.invalidate(positionQid);
 }
 
+// The refresh button: forgets what's cached about some offices, departments or other items, so
+// the next view fetches them from Wikidata again.
+export async function purgeOffices(qids: string[]): Promise<void> {
+  const valid = uniqueValidQids(qids);
+  await Promise.all([historyCache, lifespanCache, deputiesCache, departmentLinksCache, entityCache].map((c) => c.purge(valid)));
+}
+
+export async function purgeDepartments(qids: string[]): Promise<void> {
+  const valid = uniqueValidQids(qids);
+  await Promise.all([departmentDetailsCache, departmentOfficesCache, departmentProfileCache, entityCache].map((c) => c.purge(valid)));
+}
+
+export async function purgeItems(qids: string[]): Promise<void> {
+  await entityCache.purge(uniqueValidQids(qids));
+}
+
+// A country's office list, and the list of a department class's members, if it has one.
+export async function purgeCountryLists(countryQid: string, departmentClassQid: string | null): Promise<void> {
+  await Promise.all([
+    cabinetPositionsCache.purge(uniqueValidQids([countryQid])),
+    departmentClassQid ? departmentsOfClassCache.purge(uniqueValidQids([departmentClassQid])) : Promise.resolve(),
+  ]);
+}
+
 export interface EntitySearchResult {
   id: string;
   label: string;
@@ -92,6 +117,8 @@ export interface PositionHistoryRow {
   // Wikidata P18 ("image"), already bound by SPARQL as a full Commons Special:FilePath URL —
   // append `?width=<n>` directly to it to get a sized thumbnail, no filename parsing needed.
   imageUrl: string | null;
+  // A term this tool saved that Wikidata's query service doesn't show yet (store/recentTermEdits.ts).
+  pending?: boolean;
 }
 
 function buildHistoryQuery(qids: string[]): string {
@@ -141,7 +168,7 @@ export async function fetchOfficeholderHistory(qids: string[]): Promise<Position
     }
     return rows;
   });
-  return validQids.flatMap((q) => byPosition.get(q) ?? []);
+  return validQids.flatMap((q) => withRecentTermEdits(q, byPosition.get(q) ?? []));
 }
 
 export interface PositionLifespan {

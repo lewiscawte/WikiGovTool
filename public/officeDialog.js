@@ -1,6 +1,7 @@
 // The office comparison dialog (Wikidata vs Wikipedia) and the add-office dialog, shared by
 // both pages. Importing this module adds the dialogs' markup to the page.
-import { api, officeTitle, QID_ONLY_RE, renderSourceLinks, state } from './shared.js';
+import { api, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
+import { openAddOfficeholderDialog } from './officeholderDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="addOfficeBackdrop">
@@ -103,6 +104,8 @@ document.body.insertAdjacentHTML('beforeend', `
       </section>
 
       <div class="dialog-actions">
+        <button type="button" class="btn" id="refreshOfficeBtn">Refresh from Wikidata</button>
+        <button type="button" class="btn" id="addHolderBtn">Add officeholder</button>
         <button type="button" class="btn" id="linkBtn">Save link locally</button>
         <button type="button" class="btn" id="cancelBtn">Close</button>
         <button type="button" class="btn btn-primary" id="saveBtn">Save to Wikidata</button>
@@ -113,6 +116,7 @@ document.body.insertAdjacentHTML('beforeend', `
 
 const backdrop = document.getElementById('backdrop');
 const linkBtn = document.getElementById('linkBtn');
+const refreshOfficeBtn = document.getElementById('refreshOfficeBtn');
 const addOfficeBackdrop = document.getElementById('addOfficeBackdrop');
 const addOfficeStatus = document.getElementById('addOfficeStatus');
 const newOfficeTitle = document.getElementById('new-office-title');
@@ -199,6 +203,8 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
   dialogTitle.textContent = officeTitle(position.title);
   setStatus(dialogStatus, '');
   linkBtn.hidden = Boolean(position.dynamic);
+  refreshOfficeBtn.hidden = !position.wikidataQid;
+  refreshOfficeBtn.disabled = false;
 
   dialogFields.office.value = position.title;
   dialogFields.dept.value = position.department;
@@ -256,6 +262,37 @@ function closeDialog() {
 }
 
 document.getElementById('cancelBtn').addEventListener('click', closeDialog);
+
+// Refetches the office, and its officeholder's item, from Wikidata, then reloads the view.
+refreshOfficeBtn.addEventListener('click', async () => {
+  const qid = currentEntry?.position.wikidataQid;
+  if (!qid) return;
+  const personQid = currentEntry.officeholder?.personWikidataQid;
+  refreshOfficeBtn.disabled = true;
+  setStatus(dialogStatus, 'Refreshing from Wikidata…');
+  try {
+    await Promise.all([
+      refreshFromWikidata('office', qid),
+      personQid ? refreshFromWikidata('item', personQid) : null,
+    ]);
+    closeDialog();
+    await onDataChanged();
+  } catch (err) {
+    refreshOfficeBtn.disabled = false;
+    setStatus(dialogStatus, err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't refresh: ${err.message}`, true);
+  }
+});
+
+// Another holder for this office, e.g. after ending the current one's term above. The left
+// office date, if any, is offered as their start.
+document.getElementById('addHolderBtn').addEventListener('click', () => {
+  if (!currentEntry) return;
+  const entry = currentEntry;
+  const start = termDateForWikidata(dialogFields.end.value);
+  const onSave = onDataChanged;
+  closeDialog();
+  openAddOfficeholderDialog(entry, { onSave, start: start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : '' });
+});
 backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeDialog(); });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;

@@ -1,4 +1,4 @@
-import { api, renderSourceLinks, state } from './shared.js';
+import { api, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="departmentDialogBackdrop">
@@ -51,6 +51,7 @@ document.body.insertAdjacentHTML('beforeend', `
       </div>
       <p class="status-line" id="departmentDialogStatus"></p>
       <div class="dialog-actions">
+        <button type="button" class="btn" id="departmentDialogRefresh">Refresh from Wikidata</button>
         <button type="button" class="btn" id="departmentDialogCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="departmentDialogSave">Save</button>
       </div>
@@ -73,6 +74,7 @@ const deptSourceLinks = document.getElementById('deptSourceLinks');
 const statusEl = document.getElementById('departmentDialogStatus');
 const cancelBtn = document.getElementById('departmentDialogCancel');
 const saveBtn = document.getElementById('departmentDialogSave');
+const refreshBtn = document.getElementById('departmentDialogRefresh');
 
 let mode = 'add'; // 'add' | 'edit'
 let editQid = null;
@@ -253,6 +255,7 @@ export function openAddDepartmentDialog({ onSave } = {}) {
   editQid = null;
   onSaveCallback = onSave || (() => {});
   titleEl.textContent = 'Add department';
+  refreshBtn.hidden = true;
   addSection.style.display = 'block';
   labelInput.value = '';
   qidInput.value = '';
@@ -281,11 +284,28 @@ export function openEditDepartmentDialog(dept, { onSave } = {}) {
   dissolvedInput.value = dept.dissolved ? dept.dissolved.slice(0, 10) : '';
   // The QID is what the edit is keyed on, so it can't be changed here.
   qidInput.readOnly = true;
+  refreshBtn.hidden = !QID_RE.test(qidInput.value);
+  refreshBtn.disabled = false;
   setStatus('');
   loadProfile(qidInput.value);
   backdrop.classList.add('open');
   labelInput.focus();
 }
+
+// Refetches the department from Wikidata, then reloads the view.
+refreshBtn.addEventListener('click', async () => {
+  if (mode !== 'edit' || !QID_RE.test(editQid || '')) return;
+  refreshBtn.disabled = true;
+  setStatus('Refreshing from Wikidata…');
+  try {
+    await refreshFromWikidata('department', editQid);
+    close();
+    await onSaveCallback();
+  } catch (err) {
+    refreshBtn.disabled = false;
+    setStatus(err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't refresh: ${err.message}`, true);
+  }
+});
 
 saveBtn.addEventListener('click', async () => {
   const label = labelInput.value.trim();

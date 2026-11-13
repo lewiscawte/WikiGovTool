@@ -45,6 +45,12 @@ export async function api(path, opts) {
   return body;
 }
 
+// Forgets the server's cached copy of an office, department, item or whole country, so the
+// next load fetches it from Wikidata. Needs login.
+export function refreshFromWikidata(scope, qid) {
+  return api('/api/cache/refresh', { method: 'POST', body: JSON.stringify({ scope, qid }) });
+}
+
 const REPO_URL = 'https://github.com/lewiscawte/WikiGovTool';
 
 // The deployed commit in the footer, linked to GitHub, so a bug report can say which build.
@@ -167,6 +173,12 @@ export function holderLine(className, officeholder, onAdd) {
     local.textContent = 'Added locally, not on Wikidata';
     line.appendChild(local);
   }
+  if (officeholder.pending) {
+    const pending = document.createElement('span');
+    pending.className = 'holder-local';
+    pending.textContent = 'Saved to Wikidata; its query service hasn\'t caught up yet';
+    line.appendChild(pending);
+  }
   return line;
 }
 
@@ -287,6 +299,9 @@ export function initMasthead({ load, rerender }) {
 
   const params = new URLSearchParams(location.search);
   if (QID_ONLY_RE.test(params.get('country') || '')) state.countryQid = params.get('country');
+  // ?refresh=1 refetches the whole country from Wikidata on this load. syncUrl drops it from
+  // the address, so reloading the page doesn't do it again.
+  const refreshRequested = params.get('refresh') === '1';
 
   const todayIdx = dayIndexFor(new Date());
   slider.min = '0';
@@ -371,7 +386,21 @@ export function initMasthead({ load, rerender }) {
 
   refreshLoginState();
   syncUrl();
-  const ready = populateCountries().then(() => load(currentDateParam(), state.countryQid));
+  const ready = populateCountries().then(async () => {
+    let refreshError = null;
+    if (refreshRequested) {
+      cabinetEl.textContent = 'Refreshing from Wikidata…';
+      refreshError = await refreshFromWikidata('country', state.countryQid).then(() => null, (err) => err);
+    }
+    await load(currentDateParam(), state.countryQid);
+    if (refreshError) {
+      const hint = document.getElementById('hint');
+      hint.textContent = refreshError.status === 401
+        ? 'Log in with Wikimedia to refresh from Wikidata. Showing cached data.'
+        : `Couldn't refresh from Wikidata: ${refreshError.message}. Showing cached data.`;
+      hint.className = 'status-line error';
+    }
+  });
 
   return {
     ready,

@@ -11,6 +11,7 @@ import { infoboxRouter } from './routes/infobox';
 import { authRouter } from './routes/auth';
 import { countriesRouter } from './routes/countries';
 import { officeholdersRouter } from './routes/officeholders';
+import { cacheRouter } from './routes/cache';
 import { version } from './version';
 import { UpstreamRateLimitedError } from './services/upstream';
 import { StoreLimitError } from './store/limits';
@@ -47,6 +48,7 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   app.use('/api/countries', countriesRouter);
   app.use('/api/officeholders', officeholdersRouter);
+  app.use('/api/cache', cacheRouter);
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({ error: `No route for ${req.method} ${req.path}` });

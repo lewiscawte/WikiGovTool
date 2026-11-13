@@ -44,6 +44,9 @@ export interface OfficeholderTerm {
   // True for a holder a user picked locally because Wikidata records none for this date
   // (see store/officeholderStore.ts) — shown as such, since it's a gap on Wikidata.
   local?: boolean;
+  // True when this term was saved through this tool and Wikidata's query service doesn't
+  // show it yet (see store/recentTermEdits.ts).
+  pending?: boolean;
 }
 
 export interface OrgChartEntry {

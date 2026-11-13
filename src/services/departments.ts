@@ -12,6 +12,9 @@ import {
   fetchPositionLifespans,
   PositionHistoryRow,
   PositionLifespan,
+  purgeCountryLists,
+  purgeDepartments,
+  purgeOffices,
 } from './wikidataClient';
 import { buildEntry, existedOn, loadCabinetPositions } from './orgchart';
 import { Department, DepartmentsView, OrgChartEntry, OrgChartPosition } from '../types';
@@ -225,4 +228,27 @@ export async function buildDepartmentsView(date: Date, countryQid: string): Prom
   ]);
 
   return assembleDepartments({ date, country: countryQid, cabinet, links, details, offices, lifespans, history, deputyPairs });
+}
+
+// The ?refresh=1 page load: forgets everything cached about a country's offices and departments,
+// so the view that follows is fetched from Wikidata afresh. The QIDs to forget are read
+// through the cache first; any that change on the refetch are new and were never cached.
+export async function refreshCountry(countryQid: string): Promise<{ offices: number; departments: number }> {
+  const cabinet = await loadCabinetPositions(countryQid);
+  const cabinetQids = cabinet.map((p) => p.wikidataQid).filter((q): q is string => !!q);
+  const classQid = DEPARTMENT_CLASSES[countryQid] ?? null;
+  const [links, classDepartments] = await Promise.all([
+    fetchDepartmentLinks(cabinetQids),
+    classQid ? fetchDepartmentsOfClass(classQid) : Promise.resolve([]),
+  ]);
+  const departmentQids = [...new Set([...links.map((l) => l.departmentQid), ...classDepartments])];
+  const offices = await fetchDepartmentOffices(departmentQids);
+  const officeQids = [...new Set([...cabinetQids, ...offices.map((o) => o.positionQid)])];
+
+  await Promise.all([
+    purgeCountryLists(countryQid, classQid),
+    purgeOffices(officeQids),
+    purgeDepartments(departmentQids),
+  ]);
+  return { offices: officeQids.length, departments: departmentQids.length };
 }

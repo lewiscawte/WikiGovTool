@@ -186,6 +186,7 @@ export function buildEntry(position: OrgChartPosition, history: PositionHistoryR
       endDate: term.end,
       termOrdinal: termOrdinalFor(dated, term),
       imageUrl: term.imageUrl,
+      ...(term.pending ? { pending: true } : {}),
     },
     deputies: [],
   };

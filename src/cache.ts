@@ -156,6 +156,14 @@ export class ReadThroughCache<V> {
     if (remote) await this.remoteCall('del', () => remote.del([this.remoteKey(id)]));
   }
 
+  // On request: forgets the ids so the next read fetches them, without the short-lived
+  // treatment invalidate gives an edit.
+  async purge(ids: string[]): Promise<void> {
+    for (const id of ids) this.memory.delete(id);
+    const remote = this.remote;
+    if (remote && ids.length > 0) await this.remoteCall('del', () => remote.del(ids.map((id) => this.remoteKey(id))));
+  }
+
   private wasRecentlyEdited(id: string): boolean {
     const until = this.recentlyEdited.get(id);
     return until !== undefined && Date.now() < until;

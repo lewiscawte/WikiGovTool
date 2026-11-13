@@ -43,6 +43,11 @@ never from the cache.
 The first load for a country can take up to a minute, because the queries that find a
 country's offices are slow when nothing is cached yet.
 
+To see changes made on Wikidata sooner, log in and use "Refresh from Wikidata" in an office or
+department dialog, or add `?refresh=1` to the page address to refetch the whole country. Terms
+saved through this tool show straight away, marked as waiting, until Wikidata's query service
+(which runs minutes behind edits) catches up.
+
 ## Running it locally
 
 Requires Node.js 20 or later.

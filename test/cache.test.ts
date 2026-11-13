@@ -281,3 +281,21 @@ test('TtlCache does not keep a single value larger than its byte budget', () => 
   cache.set('big', 'x'.repeat(5000));
   assert.equal(cache.get('big'), undefined);
 });
+
+test('purge forgets ids in memory and Redis, and refetches them at the normal TTL', async () => {
+  const remote = new FakeRemote();
+  const cache = new ReadThroughCache<string>('test', { ttlMs: HOUR, remote });
+  const { calls, state, fetchMissing } = fetcher();
+  await cache.getMany(['Q1', 'Q2'], fetchMissing);
+  await cache.purge(['Q1']);
+  assert.equal(remote.data.has('v1:test:Q1'), false);
+  state.version = 2;
+  const result = await cache.getMany(['Q1', 'Q2'], fetchMissing);
+  assert.deepEqual(calls, [['Q1', 'Q2'], ['Q1']]);
+  assert.equal(result.get('Q1'), 'Q1@2');
+  assert.equal(result.get('Q2'), 'Q2@1');
+  // Unlike invalidate, a purge isn't an edit: the refetched value stays fresh for the full TTL.
+  mock.timers.tick(30 * MINUTE);
+  await cache.getMany(['Q1'], fetchMissing);
+  assert.equal(calls.length, 2);
+});

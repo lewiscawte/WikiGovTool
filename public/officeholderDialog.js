@@ -183,18 +183,22 @@ searchInput.addEventListener('input', () => {
   searchTimeout = setTimeout(() => runSearch(q), 300);
 });
 
-export function openAddOfficeholderDialog(entry, { onSave } = {}) {
+// `start`, if given, prefills the took office date.
+export function openAddOfficeholderDialog(entry, { onSave, start = '' } = {}) {
   currentEntry = entry;
   currentDate = currentDateParam();
   onSaveCallback = onSave || (() => {});
   const office = officeTitle(entry.position.title);
   titleEl.textContent = `Add officeholder: ${office}`;
-  introEl.textContent = `Wikidata records no holder of this office on ${currentDate}. Find the person on Wikipedia `
+  const situation = entry.officeholder?.personName
+    ? `A locally added officeholder shows on dates Wikidata records no holder for, so end the current holder's term first.`
+    : `Wikidata records no holder of this office on ${currentDate}.`;
+  introEl.textContent = `${situation} Find the person on Wikipedia `
     + 'or Wikidata. Only people (Wikidata "instance of: human") alive on that date are listed, and anyone '
     + 'Wikidata already records in this office comes first. This is saved locally; nothing is written to Wikidata.';
   searchInput.value = '';
   resultsEl.innerHTML = '';
-  startInput.value = '';
+  startInput.value = start;
   endInput.value = '';
   setStatus(searchStatus, '');
   setStatus(statusEl, '');
