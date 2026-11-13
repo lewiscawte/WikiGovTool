@@ -504,7 +504,8 @@ function hideReview() {
   pendingEdit = null;
 }
 
-function termRequest(statementId = null) {
+// choice: { statementId, officeStatementId }, the statements the user picked when several match.
+function termRequest(choice = {}) {
   const position = currentEntry?.position;
   const personQid = currentEntry?.officeholder?.personWikidataQid;
   if (!position?.wikidataQid) throw new Error('This office has no Wikidata item to save to.');
@@ -514,44 +515,58 @@ function termRequest(statementId = null) {
   if (start === null) throw new Error(`Can't read "${dialogFields.start.value}" as a date. Use YYYY-MM-DD.`);
   if (end === null) throw new Error(`Can't read "${dialogFields.end.value}" as a date. Use YYYY-MM-DD.`);
   const sources = { start: start ? sourceFor('start') : null, end: end ? sourceFor('end') : null };
-  return { personQid, positionQid: position.wikidataQid, start, end, statementId, sources };
+  return {
+    personQid, positionQid: position.wikidataQid, start, end,
+    statementId: choice.statementId ?? null, officeStatementId: choice.officeStatementId ?? null, sources,
+  };
 }
 
-function renderReview({ plan, username, tags }, request) {
-  reviewBody.innerHTML = '';
-  const intro = document.createElement('p');
-  intro.append(`As ${username}, on `, wikidataLink(plan.personQid, `${plan.personLabel} (${plan.personQid})`), ':');
-  reviewBody.appendChild(intro);
+const LINK_LABELS = { P39: 'position held', P1308: 'officeholder' };
 
-  if (plan.needsChoice) {
+// One item's half of the review: its heading, then a choice of statement or the changes to it.
+// Returns false when the user has to choose a statement first.
+function renderSide(side, request) {
+  const heading = document.createElement('p');
+  heading.append('On ', wikidataLink(side.entityQid, `${side.entityLabel} (${side.entityQid})`), ':');
+  reviewBody.appendChild(heading);
+  const linkLabel = LINK_LABELS[side.property];
+
+  if (side.needsChoice) {
     const ask = document.createElement('p');
-    ask.textContent = `${plan.personLabel} has ${plan.candidates.length} "position held" statements for this office. Which term is this?`;
+    ask.textContent = `${side.entityLabel} has ${side.candidates.length} "${linkLabel}" statements for this term. Which one is it?`;
     const list = document.createElement('ul');
     list.className = 'edit-review-choices';
-    plan.candidates.forEach((c) => {
+    side.candidates.forEach((c) => {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn';
       btn.textContent = `${c.start ?? 'no start'} – ${c.end ?? 'no end'}${c.rank === 'normal' ? '' : ` (${c.rank} rank)`}`;
-      btn.addEventListener('click', () => previewEdit(c.id));
+      const key = side.property === 'P39' ? 'statementId' : 'officeStatementId';
+      btn.addEventListener('click', () => previewEdit({
+        statementId: request.statementId, officeStatementId: request.officeStatementId, [key]: c.id,
+      }));
       li.appendChild(btn);
       list.appendChild(li);
     });
     reviewBody.append(ask, list);
-    publishBtn.hidden = true;
-    reviewEl.hidden = false;
-    return;
+    return false;
   }
 
+  if (side.statementId && side.changes.length === 0) {
+    const p = document.createElement('p');
+    p.textContent = 'Already has these dates. Nothing to change.';
+    reviewBody.appendChild(p);
+    return true;
+  }
   const changes = document.createElement('ul');
   changes.className = 'edit-review-changes';
-  if (!plan.statementId) {
+  if (!side.statementId) {
     const li = document.createElement('li');
-    li.append('Add a new "position held" statement: ', wikidataLink(plan.positionQid, `${officeTitle(currentEntry.position.title)} (${plan.positionQid})`));
+    li.append(`Add a new "${linkLabel}" statement: `, wikidataLink(side.valueQid));
     changes.appendChild(li);
   }
-  plan.changes.forEach((c) => {
+  side.changes.forEach((c) => {
     const li = document.createElement('li');
     const verb = c.from ? 'Change' : 'Add';
     li.append(`${verb} ${c.label} (${c.property}): `);
@@ -563,9 +578,10 @@ function renderReview({ plan, username, tags }, request) {
     const to = document.createElement('ins');
     to.textContent = c.to;
     li.appendChild(to);
+    if (c.copiedFrom) li.append(' (copied from ', wikidataLink(c.copiedFrom), ')');
     changes.appendChild(li);
   });
-  plan.references.forEach((r) => {
+  side.references.forEach((r) => {
     const li = document.createElement('li');
     const link = document.createElement('a');
     link.href = r.url;
@@ -576,31 +592,56 @@ function renderReview({ plan, username, tags }, request) {
     li.append('Add reference: imported from English Wikipedia, revision ', String(r.revid), ' of ', link);
     changes.appendChild(li);
   });
-  const nothing = plan.statementId && plan.changes.length === 0;
-  if (nothing) {
-    const p = document.createElement('p');
-    p.textContent = 'Wikidata already has these dates. Nothing to change.';
-    reviewBody.appendChild(p);
-  } else {
-    reviewBody.appendChild(changes);
+  reviewBody.appendChild(changes);
+  return true;
+}
+
+function renderReview({ plan, username, tags }, request) {
+  reviewBody.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.textContent = `As ${username}, the term is saved on both the officeholder and the office:`;
+  reviewBody.appendChild(intro);
+
+  // The office side is only planned once the person's statement is settled.
+  const ready = renderSide(plan.person, request) && renderSide(plan.office, request);
+  if (!ready) {
+    publishBtn.hidden = true;
+    reviewEl.hidden = false;
+    return;
   }
 
+  plan.conflicts.forEach((c) => {
+    const p = document.createElement('p');
+    p.className = 'status-line error';
+    p.textContent = `The two items disagree on the ${c.label}: ${c.person} on the officeholder, ${c.office} on the office. `
+      + 'Neither is changed; enter the right date above to set both.';
+    reviewBody.appendChild(p);
+  });
+
+  const hasWork = (side) => !side.statementId || side.changes.length > 0;
+  const nothing = !hasWork(plan.person) && !hasWork(plan.office);
   const note = document.createElement('p');
   note.className = 'edit-review-note';
   note.textContent = `Only the term dates are saved; name, party and the office fields are not. `
     + (tags ? `Tagged: ${tags}.` : 'No edit tag is configured.');
   reviewBody.appendChild(note);
 
-  pendingEdit = nothing ? null : { ...request, statementId: plan.statementId, baseRevId: plan.baseRevId };
+  pendingEdit = nothing ? null : {
+    ...request,
+    statementId: plan.person.statementId,
+    officeStatementId: plan.office.statementId,
+    baseRevId: plan.person.baseRevId,
+    officeBaseRevId: plan.office.baseRevId,
+  };
   publishBtn.hidden = nothing;
   publishBtn.disabled = false;
   reviewEl.hidden = false;
 }
 
-async function previewEdit(statementId = null) {
+async function previewEdit(choice = {}) {
   let request;
   try {
-    request = termRequest(statementId);
+    request = termRequest(choice);
   } catch (err) {
     setStatus(dialogStatus, err.message, true);
     return;
@@ -624,24 +665,26 @@ publishBtn.addEventListener('click', async () => {
   publishBtn.disabled = true;
   setStatus(dialogStatus, 'Publishing to Wikidata…');
   try {
-    const { revisions } = await api('/api/wikidata/term/save', { method: 'POST', body: JSON.stringify(pendingEdit) });
+    const { applied } = await api('/api/wikidata/term/save', { method: 'POST', body: JSON.stringify(pendingEdit) });
     hideReview();
     dialogStatus.className = 'status-line';
     dialogStatus.textContent = 'Saved to Wikidata. ';
-    const last = revisions[revisions.length - 1];
-    if (last) {
+    // One diff per item, spanning every edit made to it.
+    applied.forEach(({ entityQid, baseRevId, revisions }) => {
+      const last = revisions[revisions.length - 1];
+      if (!last) return;
       const diff = document.createElement('a');
-      diff.href = `https://www.wikidata.org/w/index.php?diff=${last}`;
+      diff.href = `https://www.wikidata.org/w/index.php?title=${entityQid}&diff=${last}&oldid=${baseRevId}`;
       diff.target = '_blank';
       diff.rel = 'noopener';
-      diff.textContent = revisions.length === 1 ? 'View the edit' : `View the last of ${revisions.length} edits`;
+      diff.textContent = `View the ${revisions.length === 1 ? 'edit' : `${revisions.length} edits`} to ${entityQid}`;
       dialogStatus.append(diff, '. ');
-    }
+    });
     dialogStatus.append("Wikidata's query service can take a few minutes to show it here.");
     await onDataChanged();
   } catch (err) {
     publishBtn.disabled = false;
-    const partial = err.body?.revisions?.length ? ` ${err.body.revisions.length} edit(s) went through before this; check the item's history.` : '';
+    const partial = err.body?.revisions?.length ? ` ${err.body.revisions.length} edit(s) went through before this; check the items' history.` : '';
     setStatus(dialogStatus, (err.status === 401 ? 'Log in with Wikimedia first.' : err.message) + partial, true);
   }
 });
