@@ -1,4 +1,5 @@
 import { api, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
+import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="departmentDialogBackdrop">
@@ -75,6 +76,27 @@ const statusEl = document.getElementById('departmentDialogStatus');
 const cancelBtn = document.getElementById('departmentDialogCancel');
 const saveBtn = document.getElementById('departmentDialogSave');
 const refreshBtn = document.getElementById('departmentDialogRefresh');
+
+// After any search: the department may not be on Wikidata at all.
+const createLine = createItemLine("Can't find it? Create a new Wikidata item for this department", () => {
+  const q = searchInput.value.trim();
+  openCreateItemDialog('department', { label: /^Q[1-9]\d*$/.test(q) ? '' : q, onDone: departmentCreated });
+});
+createLine.hidden = true;
+resultsSelect.parentElement.after(createLine);
+
+function departmentCreated({ qid, label, created }) {
+  qidInput.value = qid;
+  if (!labelInput.value.trim()) labelInput.value = label;
+  if (!created) {
+    loadProfile(qid, { fill: true });
+    return;
+  }
+  // Wikidata's query service, which the profile comes from, won't have it for a few minutes.
+  profileRequest++;
+  profile = null;
+  renderProfile(`Created ${qid} on Wikidata. Its details will show here once Wikidata's query service has it, in a few minutes. Save to add it to the page.`);
+}
 
 let mode = 'add'; // 'add' | 'edit'
 let editQid = null;
@@ -219,6 +241,7 @@ searchInput.addEventListener('input', () => {
   searchTimeout = setTimeout(async () => {
     try {
       const res = await api(`/api/wikidata/search?q=${encodeURIComponent(q)}`);
+      createLine.hidden = false;
       const results = res.results || [];
       if (results.length === 0) {
         const opt = document.createElement('option');
@@ -256,6 +279,7 @@ export function openAddDepartmentDialog({ onSave } = {}) {
   onSaveCallback = onSave || (() => {});
   titleEl.textContent = 'Add department';
   refreshBtn.hidden = true;
+  createLine.hidden = true;
   addSection.style.display = 'block';
   labelInput.value = '';
   qidInput.value = '';

@@ -59,7 +59,7 @@ export function formatTime(t: { time: string; precision: number }): string {
   return year;
 }
 
-function timeValue(t: TimeInput) {
+export function timeValue(t: TimeInput) {
   return { time: t.time, timezone: 0, before: 0, after: 0, precision: t.precision, calendarmodel: GREGORIAN };
 }
 

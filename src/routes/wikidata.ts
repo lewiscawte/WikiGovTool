@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { fetchEntityForEdit, getEntity, invalidateOfficeholderHistory, searchEntities } from '../services/wikidataClient';
+import {
+  fetchEntityForEdit, getEntity, invalidateNewItem, invalidateOfficeholderHistory, purgeCountryLists, searchEntities,
+} from '../services/wikidataClient';
+import {
+  createItem, fetchLabels, findPossibleDuplicates, parseNewItem, plannedStatements, PROPERTY_LABELS, referencedItems,
+} from '../services/wikidataCreate';
 import {
   applyTermPlan, EditInputError, parseDateInput, planHasWork, planTermEdit, TermPlan, TermProperty, WikidataApiError,
   WikipediaSource,
@@ -146,5 +151,58 @@ wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
     else if (err instanceof WikidataApiError) {
       res.status(502).json({ error: `Wikidata refused the edit to ${err.entityQid} (${err.code}): ${err.message}`, revisions: err.completedRevisions });
     } else next(err);
+  }
+});
+
+// New items for a person, office or department not on Wikidata yet. Both endpoints take the
+// fields parseNewItem lists for the kind; the item itself is always built on the server.
+wikidataRouter.post('/item/preview', requireAuth, async (req, res, next) => {
+  try {
+    const item = parseNewItem(req.body);
+    const [labels, duplicates] = await Promise.all([fetchLabels(referencedItems(item)), findPossibleDuplicates(item.label)]);
+    res.json({
+      statements: plannedStatements(item),
+      labels,
+      propertyLabels: PROPERTY_LABELS,
+      duplicates,
+      username: req.session.user?.username,
+      tags: config.wikidataEditTags || null,
+    });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else next(err);
+  }
+});
+
+wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
+  try {
+    const item = parseNewItem(req.body);
+    const created = await createItem(req, item);
+    // A new person given the office they hold: the office lists them too (officeholder,
+    // P1308), as a term saved through the office dialog would. The item exists by now either
+    // way, so a failure here is reported alongside it rather than as a failed create.
+    let officeholder: { revisions: number[] } | { error: string } | null = null;
+    if (item.kind === 'person' && item.heldPositionQid) {
+      try {
+        const [person, office] = await Promise.all([fetchEntityForEdit(created.qid), fetchEntityForEdit(item.heldPositionQid)]);
+        if (!person || !office) throw new Error('the new item or the office could not be read back from Wikidata');
+        const plan = planTermEdit(person, office, item.heldStart ?? null, item.heldEnd ?? null);
+        const applied = planHasWork(plan) ? await applyTermPlan(req, plan) : [];
+        recordSavedTerm(plan, person);
+        await invalidateOfficeholderHistory(item.heldPositionQid);
+        officeholder = { revisions: applied.flatMap((a) => a.revisions) };
+      } catch (err) {
+        officeholder = { error: (err as Error).message };
+      }
+    }
+    // So the country's office list is fetched again, and finds the office once Wikidata's
+    // query service has it.
+    if (item.kind === 'office') await purgeCountryLists(item.countryQid, null);
+    if (item.kind !== 'person') await invalidateNewItem(item.kind, created.qid);
+    res.status(201).json({ ...created, label: item.label, officeholder });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else if (err instanceof WikidataApiError) res.status(502).json({ error: `Wikidata refused the new item (${err.code}): ${err.message}` });
+    else next(err);
   }
 });

@@ -494,6 +494,30 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
   color: var(--ink); background: var(--paper); border: 1px solid var(--rule-soft); border-radius: var(--radius);
 }
 
+/* Creating a Wikidata item the searches couldn't find. Opens over the dialog it came from. */
+.dialog-backdrop-top { z-index: 11; }
+.create-item-line { margin: var(--gap-2) 0; font-size: var(--t-sm); }
+.link-btn {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: var(--blue);
+}
+.link-btn:hover { text-decoration: underline; }
+.create-item-wide { grid-column: 1 / -1; }
+.create-item-check { display: flex; margin-bottom: var(--gap-2); }
+.create-item-hint { margin-top: var(--gap-1); font-size: var(--t-xs); color: var(--ink-muted); }
+.create-item-source {
+  margin-top: var(--gap-4); padding: var(--gap-3);
+  border: 1px solid var(--rule-soft); border-radius: var(--radius); background: var(--paper);
+}
+.create-item-results { list-style: none; margin: var(--gap-1) 0 0; padding: 0; }
+.create-item-results:empty { display: none; }
+.create-item-result {
+  display: block; width: 100%; padding: var(--gap-1) var(--gap-2); text-align: left;
+  border: 0; border-radius: var(--radius); background: none; cursor: pointer;
+  font: var(--t-sm) var(--sans); color: var(--ink);
+}
+.create-item-result:hover { background: var(--paper); }
+
 /* ---------- Small screens ---------- */
 
 @media (max-width: 600px) {

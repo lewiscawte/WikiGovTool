@@ -43,6 +43,11 @@ never from the cache.
 The first load for a country can take up to a minute, because the queries that find a
 country's offices are slow when nothing is cached yet.
 
+When a search can't find a person, office or department, "Create a new Wikidata item" opens a
+form with the usual statements for that kind of item. It's previewed, along with any existing
+items of the same name, before anything is created, and a source URL given there is cited on the
+new statements.
+
 To see changes made on Wikidata sooner, log in and use "Refresh from Wikidata" in an office or
 department dialog, or add `?refresh=1` to the page address to refetch the whole country. Terms
 saved through this tool show straight away, marked as waiting, until Wikidata's query service

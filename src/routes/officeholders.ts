@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { fetchPeople, PersonCandidate, searchEntities } from '../services/wikidataClient';
+import { fetchPeople, fetchPersonDirect, PersonCandidate, searchEntities } from '../services/wikidataClient';
 import { searchArticles } from '../services/wikipediaClient';
 import { addLocalOfficeholder } from '../store/officeholderStore';
 import { requireAuth } from '../middleware/requireAuth';
@@ -82,7 +82,8 @@ officeholdersRouter.post('/', requireAuth, async (req, res, next) => {
       res.status(400).json({ error: 'Left office is before took office' });
       return;
     }
-    const [person] = await fetchPeople([personQid], null);
+    // An item created moments ago isn't in the query service yet, so read it directly.
+    const person = (await fetchPeople([personQid], null))[0] ?? await fetchPersonDirect(personQid);
     if (!person) {
       res.status(400).json({ error: `${personQid} isn't a person on Wikidata` });
       return;

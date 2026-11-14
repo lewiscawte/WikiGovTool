@@ -69,6 +69,15 @@ export async function purgeItems(qids: string[]): Promise<void> {
   await entityCache.purge(uniqueValidQids(qids));
 }
 
+// A just-created office or department: the query service doesn't have it yet, so what's
+// fetched about it is only kept briefly until it has (see ReadThroughCache.invalidate).
+export async function invalidateNewItem(kind: 'office' | 'department', qid: string): Promise<void> {
+  const caches = kind === 'office'
+    ? [historyCache, lifespanCache, deputiesCache, departmentLinksCache]
+    : [departmentDetailsCache, departmentOfficesCache, departmentProfileCache];
+  await Promise.all(caches.map((c) => c.invalidate(qid)));
+}
+
 // A country's office list, and the list of a department class's members, if it has one.
 export async function purgeCountryLists(countryQid: string, departmentClassQid: string | null): Promise<void> {
   await Promise.all([
@@ -595,6 +604,31 @@ export async function fetchPeople(qids: string[], positionQid: string | null): P
     return new Map(missing.map((q) => [cacheId(q), people.get(q) ?? null]));
   });
   return validQids.map((q) => found.get(cacheId(q))).filter((p): p is PersonCandidate => !!p);
+}
+
+// One person read straight from Wikidata's API rather than the query service, for an item
+// created moments ago that the query service doesn't have yet. Null unless it's a human (P31 Q5).
+export async function fetchPersonDirect(qid: string): Promise<PersonCandidate | null> {
+  const entity = await fetchEntityForEdit(qid);
+  const values = (property: string) => (entity?.claims?.[property] ?? [])
+    .map((c: any) => (c.mainsnak?.snaktype === 'value' ? c.mainsnak.datavalue?.value : null))
+    .filter((v: any) => v != null);
+  if (!values('P31').some((v: any) => v.id === 'Q5')) return null;
+  const day = (property: string) => {
+    const t = values(property)[0]?.time;
+    return typeof t === 'string' ? t.replace(/^\+/, '').replace(/-00/g, '-01') : null;
+  };
+  const image = values('P18')[0];
+  return {
+    qid,
+    name: entity.labels?.en?.value ?? qid,
+    description: null,
+    birth: day('P569'),
+    death: day('P570'),
+    wikipediaTitle: null,
+    imageUrl: typeof image === 'string' ? `http://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(image.replace(/ /g, '_'))}` : null,
+    heldPosition: false,
+  };
 }
 
 async function queryPeople(qids: string[], heldQid: string | null): Promise<Map<string, PersonCandidate>> {

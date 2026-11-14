@@ -1,6 +1,7 @@
 // The "Add officeholder" dialog: fills an office Wikidata records no holder for, by searching
 // Wikidata and Wikipedia for the person. Importing this module adds the dialog to the page.
 import { api, currentDateParam, officeholderImageEl, officeTitle } from './shared.js';
+import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="holderDialogBackdrop">
@@ -42,6 +43,48 @@ const startInput = document.getElementById('holderStart');
 const endInput = document.getElementById('holderEnd');
 const statusEl = document.getElementById('holderDialogStatus');
 const saveBtn = document.getElementById('holderDialogSave');
+const QID_RE = /^Q[1-9]\d*$/;
+
+// After any search: the person may not be on Wikidata at all.
+const createLine = createItemLine("Can't find them? Create a new Wikidata item for this person", () => {
+  const q = searchInput.value.trim();
+  const position = currentEntry.position;
+  openCreateItemDialog('person', {
+    label: QID_RE.test(q) ? '' : q,
+    office: position.wikidataQid ? { qid: position.wikidataQid, title: officeTitle(position.title) } : null,
+    start: startInput.value.trim(),
+    end: endInput.value.trim(),
+    onDone: personCreated,
+  });
+});
+createLine.hidden = true;
+resultsEl.after(createLine);
+
+async function personCreated({ qid, label, created, officeholder }) {
+  if (!created) {
+    // An existing item the preview turned up: the search finds it like any other.
+    searchInput.value = qid;
+    runSearch(qid);
+    return;
+  }
+  if (officeholder && 'revisions' in officeholder) {
+    // Created holding this office, on both items: nothing left to add locally.
+    close();
+    await onSaveCallback();
+    return;
+  }
+  // Wikidata's query service, which the search uses, won't have the new item for a few
+  // minutes, so list it straight away.
+  resultsEl.innerHTML = '';
+  resultsEl.appendChild(resultRow({
+    qid, name: label, description: 'Just created on Wikidata', birth: null, death: null,
+    wikipediaTitle: null, imageUrl: null, heldPosition: false,
+  }));
+  select(qid);
+  setStatus(searchStatus, officeholder?.error
+    ? `Created ${qid}, but couldn't record the office on Wikidata: ${officeholder.error}. You can add them locally below.`
+    : `Created ${qid} on Wikidata.`, Boolean(officeholder?.error));
+}
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const year = (iso) => (iso ? iso.slice(0, 4).replace(/^-?0+/, '') : null);
@@ -156,6 +199,7 @@ async function runSearch(q) {
     if (positionQid) params.set('position', positionQid);
     const { results, hidden } = await api(`/api/officeholders/search?${params}`);
     if (request !== searchRequest) return;
+    createLine.hidden = false;
     resultsEl.innerHTML = '';
     results.forEach((p) => resultsEl.appendChild(resultRow(p)));
     const note = hiddenNote(hidden);
@@ -198,6 +242,7 @@ export function openAddOfficeholderDialog(entry, { onSave, start = '' } = {}) {
     + 'Wikidata already records in this office comes first. This is saved locally; nothing is written to Wikidata.';
   searchInput.value = '';
   resultsEl.innerHTML = '';
+  createLine.hidden = true;
   startInput.value = start;
   endInput.value = '';
   setStatus(searchStatus, '');

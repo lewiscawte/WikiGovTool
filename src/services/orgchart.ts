@@ -137,7 +137,9 @@ async function loadDynamicPositions(countryQid: string): Promise<OrgChartPositio
     })),
   );
 
-  return [...discovered, ...extras];
+  // An added office linked to an item that discovery now finds too is only listed once.
+  const discoveredQids = new Set(discovered.map((p) => p.wikidataQid));
+  return [...discovered, ...extras.filter((p) => !p.wikidataQid || !discoveredQids.has(p.wikidataQid))];
 }
 
 // The org chart is an office-first structure: an office is only shown at all if it actually

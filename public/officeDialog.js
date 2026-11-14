@@ -2,15 +2,22 @@
 // both pages. Importing this module adds the dialogs' markup to the page.
 import { api, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
 import { openAddOfficeholderDialog } from './officeholderDialog.js';
+import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="addOfficeBackdrop">
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="addOfficeTitle">
       <h2 class="dialog-title" id="addOfficeTitle">Add office</h2>
       <p class="dialog-intro">
-        Adds a local entry for an office that exists in government but has no Wikidata item
-        we can find. Nothing is created on Wikidata.
+        Adds an office the page doesn't list. Search Wikidata to link its item, or create one;
+        without an item it's added locally only.
       </p>
+      <div class="field">
+        <label for="new-office-search">Search Wikidata</label>
+        <input class="input" id="new-office-search" placeholder="e.g. Minister for Widgets" autocomplete="off">
+        <ul class="create-item-results" id="new-office-results"></ul>
+      </div>
+      <p class="status-line" id="new-office-linked"></p>
       <div class="field"><label for="new-office-title">Office title</label><input class="input" id="new-office-title" placeholder="e.g. Minister for Widgets"></div>
       <div class="field"><label for="new-office-dept">Department</label><input class="input" id="new-office-dept" placeholder="e.g. Department for Business and Trade"></div>
       <div class="field"><label for="new-office-wp">Wikipedia article, if there is one</label><input class="input" id="new-office-wp"></div>
@@ -122,6 +129,58 @@ const addOfficeStatus = document.getElementById('addOfficeStatus');
 const newOfficeTitle = document.getElementById('new-office-title');
 const newOfficeDept = document.getElementById('new-office-dept');
 const newOfficeWp = document.getElementById('new-office-wp');
+const newOfficeSearch = document.getElementById('new-office-search');
+const newOfficeResults = document.getElementById('new-office-results');
+const newOfficeLinked = document.getElementById('new-office-linked');
+// The Wikidata item the new office is linked to, if one was found or created.
+let newOfficeQid = null;
+let newOfficeSearchTimer = null;
+let newOfficeSearchRequest = 0;
+
+function linkNewOffice(qid, label, note = '') {
+  newOfficeQid = qid;
+  if (!newOfficeTitle.value.trim()) newOfficeTitle.value = label;
+  newOfficeResults.innerHTML = '';
+  newOfficeLinked.textContent = `Linked to Wikidata item ${label} (${qid}). ${note}`.trim();
+  newOfficeLinked.className = 'status-line';
+}
+
+const newOfficeCreateLine = createItemLine("Can't find it? Create a new Wikidata item for this office", () => {
+  const q = newOfficeSearch.value.trim();
+  openCreateItemDialog('office', {
+    label: /^Q[1-9]\d*$/.test(q) ? '' : q,
+    onDone: ({ qid, label, created }) => linkNewOffice(qid, label, created ? 'Created on Wikidata; add the office to show it now.' : ''),
+  });
+});
+newOfficeCreateLine.hidden = true;
+newOfficeResults.after(newOfficeCreateLine);
+
+newOfficeSearch.addEventListener('input', () => {
+  clearTimeout(newOfficeSearchTimer);
+  newOfficeResults.innerHTML = '';
+  const q = newOfficeSearch.value.trim();
+  if (!q) return;
+  newOfficeSearchTimer = setTimeout(async () => {
+    const mine = ++newOfficeSearchRequest;
+    try {
+      const { results } = await api(`/api/wikidata/search?q=${encodeURIComponent(q)}`);
+      if (mine !== newOfficeSearchRequest) return;
+      newOfficeCreateLine.hidden = false;
+      results.slice(0, 8).forEach((r) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'create-item-result';
+        btn.textContent = `${r.label} (${r.id})${r.description ? ` — ${r.description}` : ''}`;
+        btn.addEventListener('click', () => linkNewOffice(r.id, r.label));
+        li.appendChild(btn);
+        newOfficeResults.appendChild(li);
+      });
+    } catch (err) {
+      setStatus(addOfficeStatus, `Search failed: ${err.message}`, true);
+    }
+  }, 250);
+});
 
 const dialogFields = {
   office: document.getElementById('f-office'),
@@ -305,9 +364,14 @@ export function openAddOfficeDialog({ onChange } = {}) {
   newOfficeTitle.value = '';
   newOfficeDept.value = '';
   newOfficeWp.value = '';
+  newOfficeSearch.value = '';
+  newOfficeResults.innerHTML = '';
+  newOfficeLinked.textContent = '';
+  newOfficeCreateLine.hidden = true;
+  newOfficeQid = null;
   setStatus(addOfficeStatus, '');
   addOfficeBackdrop.classList.add('open');
-  newOfficeTitle.focus();
+  newOfficeSearch.focus();
 }
 
 function closeAddOfficeDialog() {
@@ -331,6 +395,7 @@ document.getElementById('addOfficeSubmitBtn').addEventListener('click', async ()
         title,
         department: newOfficeDept.value.trim(),
         wikipediaTitle: newOfficeWp.value.trim(),
+        wikidataQid: newOfficeQid,
       }),
     });
     closeAddOfficeDialog();

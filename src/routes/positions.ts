@@ -22,7 +22,11 @@ function slugify(title: string): string {
 // is to flag the gap, not to fabricate a Wikidata link. Does not create anything on Wikidata
 // itself (the only Wikidata writes are term dates — see POST /api/wikidata/term/save).
 positionsRouter.post('/', requireAuth, (req, res) => {
-  const { countryQid, title, department, wikipediaTitle } = req.body ?? {};
+  const { countryQid, title, department, wikipediaTitle, wikidataQid } = req.body ?? {};
+  if (wikidataQid != null && wikidataQid !== '' && !(typeof wikidataQid === 'string' && QID_RE.test(wikidataQid))) {
+    res.status(400).json({ error: 'wikidataQid must look like "Q12345"' });
+    return;
+  }
   if (typeof title !== 'string' || !title.trim()) {
     res.status(400).json({ error: 'title is required' });
     return;
@@ -37,7 +41,7 @@ positionsRouter.post('/', requireAuth, (req, res) => {
     title: title.trim(),
     department: typeof department === 'string' && department.trim() ? department.trim() : 'Minister',
     wikipediaTitle: typeof wikipediaTitle === 'string' ? wikipediaTitle.trim() : '',
-    wikidataQid: null,
+    wikidataQid: wikidataQid || null,
   };
 
   if (country === UNITED_STATES_QID) {
