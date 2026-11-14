@@ -9,21 +9,23 @@ import {
   PositionHistoryRow,
   resolveQidFromWikipediaTitle,
 } from './wikidataClient';
-import { OrgChartEntry, OrgChartPosition, PositionBucket, PositionSeed } from '../types';
+import { OfficeholderTerm, OrgChartEntry, OrgChartPosition, PositionBucket, PositionSeed } from '../types';
 
 export const UNITED_STATES_QID = 'Q30';
 
+function coversDate(r: PositionHistoryRow, date: Date): boolean {
+  // An "unknown value" end date means Wikidata says the term is over, just not when, so it
+  // can't be shown as covering any date (same principle as pickTermForDate below).
+  if (r.endUnknown) return false;
+  const start = r.start ? new Date(r.start) : null;
+  const end = r.end ? new Date(r.end) : null;
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+  return true;
+}
+
 function findActiveTerm(candidates: PositionHistoryRow[], date: Date): PositionHistoryRow | undefined {
-  return candidates.find((r) => {
-    // An "unknown value" end date means Wikidata says the term is over, just not when, so it
-    // can't be shown as covering any date (same principle as pickTermForDate below).
-    if (r.endUnknown) return false;
-    const start = r.start ? new Date(r.start) : null;
-    const end = r.end ? new Date(r.end) : null;
-    if (start && date < start) return false;
-    if (end && date > end) return false;
-    return true;
-  });
+  return candidates.find((r) => coversDate(r, date));
 }
 
 // Wikidata occasionally has stray/vandalism P39 statements with a start date but no end
@@ -173,23 +175,44 @@ function localEntry(position: OrgChartPosition, date: Date): OrgChartEntry {
   };
 }
 
+const holderFrom = (term: PositionHistoryRow, dated: PositionHistoryRow[]): OfficeholderTerm => ({
+  personName: term.personLabel,
+  personWikidataQid: term.personQid,
+  partyLabel: term.partyLabel,
+  startDate: term.start,
+  endDate: term.end,
+  termOrdinal: termOrdinalFor(dated, term),
+  imageUrl: term.imageUrl,
+  ...(term.pending ? { pending: true } : {}),
+});
+
+// Every other term Wikidata records as covering `date`, besides the one shown: overlapping
+// terms, and open-ended ones left behind when a successor was added, which pickTermForDate
+// passes over. Listed so they can be found and fixed. One per person and start date, as SPARQL
+// can list a term once per party.
+function otherHoldersOn(position: OrgChartPosition, history: PositionHistoryRow[], shown: PositionHistoryRow, dated: PositionHistoryRow[], date: Date): OfficeholderTerm[] {
+  const seen = new Set([`${shown.personQid}|${shown.start}`]);
+  const others: OfficeholderTerm[] = [];
+  for (const r of history) {
+    if (r.positionQid !== position.wikidataQid || !r.start || !coversDate(r, date)) continue;
+    const key = `${r.personQid}|${r.start}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    others.push(holderFrom(r, dated));
+  }
+  return others;
+}
+
 export function buildEntry(position: OrgChartPosition, history: PositionHistoryRow[], date: Date): OrgChartEntry {
   if (!position.wikidataQid) return localEntry(position, date);
   const dated = datedRowsForPosition(history, position.wikidataQid);
   const term = pickTermForDate(dated, date);
   if (!term) return localEntry(position, date);
+  const others = otherHoldersOn(position, history, term, dated, date);
   return {
     position,
-    officeholder: {
-      personName: term.personLabel,
-      personWikidataQid: term.personQid,
-      partyLabel: term.partyLabel,
-      startDate: term.start,
-      endDate: term.end,
-      termOrdinal: termOrdinalFor(dated, term),
-      imageUrl: term.imageUrl,
-      ...(term.pending ? { pending: true } : {}),
-    },
+    officeholder: holderFrom(term, dated),
+    ...(others.length ? { otherHolders: others } : {}),
     deputies: [],
   };
 }

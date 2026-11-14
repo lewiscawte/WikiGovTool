@@ -74,7 +74,8 @@ async function verifiedSource(raw: any, field: string): Promise<WikipediaSource 
 // qualifiers on the person's position held statement and the office's officeholder statement,
 // and the office's own inception / dissolved dates. Both endpoints take { personQid?,
 // positionQid, start, end, statementId?, officeStatementId?, sources?, officeInception,
-// officeDissolved }; dates are "YYYY", "YYYY-MM" or "YYYY-MM-DD". An empty term date is only
+// officeDissolved, newTerm? }; dates are "YYYY", "YYYY-MM" or "YYYY-MM-DD". newTerm: true adds
+// the person to the office (see StatementChoice.newTerm) rather than editing their term. An empty term date is only
 // filled in where one side has it and the other has nothing; an empty office date leaves
 // Wikidata alone. sources.start / sources.end ({ title, revid }) mark a term date as copied
 // from that Wikipedia revision, which is then cited on the statements.
@@ -86,7 +87,7 @@ interface OfficeSavePlan {
 }
 
 async function planFromBody(body: any): Promise<OfficeSavePlan> {
-  const { personQid, positionQid, start, end, statementId, officeStatementId, sources, officeInception, officeDissolved } = body ?? {};
+  const { personQid, positionQid, start, end, statementId, officeStatementId, sources, officeInception, officeDissolved, newTerm } = body ?? {};
   if (typeof positionQid !== 'string' || !QID_RE.test(positionQid)) throw new EditInputError('This office has no Wikidata item');
   if (personQid != null && personQid !== '' && !(typeof personQid === 'string' && QID_RE.test(personQid))) {
     throw new EditInputError('Invalid officeholder Wikidata item');
@@ -97,7 +98,8 @@ async function planFromBody(body: any): Promise<OfficeSavePlan> {
   const inceptionValue = parseDateInput(typeof officeInception === 'string' ? officeInception : null, 'Created');
   const dissolvedValue = parseDateInput(typeof officeDissolved === 'string' ? officeDissolved : null, 'Abolished');
   if (inceptionValue && dissolvedValue && inceptionValue.time > dissolvedValue.time) throw new EditInputError('Abolished is before created');
-  const termDates = Boolean(startValue || endValue);
+  // Adding someone to the office is work in itself, even before their dates are known.
+  const termDates = Boolean(startValue || endValue) || (newTerm === true && Boolean(personQid));
   if (termDates && !personQid) throw new EditInputError('There is no officeholder to save term dates for');
   if (!termDates && !inceptionValue && !dissolvedValue) throw new EditInputError('Enter a date to save');
   if (statementId != null && typeof statementId !== 'string') throw new EditInputError('Invalid statement id');
@@ -110,7 +112,8 @@ async function planFromBody(body: any): Promise<OfficeSavePlan> {
   if (termDates && !person) throw new EditInputError(`${personQid} wasn't found on Wikidata`);
   if (!office) throw new EditInputError(`${positionQid} wasn't found on Wikidata`);
   const plan = termDates
-    ? planTermEdit(person, office, startValue, endValue, { person: statementId || null, office: officeStatementId || null }, verified)
+    ? planTermEdit(person, office, startValue, endValue,
+      { person: statementId || null, office: officeStatementId || null, newTerm: newTerm === true }, verified)
     : null;
   const officeDates = [planItemDate(office, 'P571', inceptionValue), planItemDate(office, 'P576', dissolvedValue)]
     .filter((c): c is DateChange => c !== null);

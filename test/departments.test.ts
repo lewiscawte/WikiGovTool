@@ -155,3 +155,23 @@ test('an added department with a Wikidata item gets its details and offices like
   assert.equal(gadgets?.label, 'Department of Gadgets');
   assert.deepEqual(gadgets?.heads.map((h) => h.officeholder?.personName), ['Portfolio Person']);
 });
+
+test('everyone else recorded in an office on the date is listed with the holder shown', () => {
+  const input = baseInput();
+  input.history = [
+    ...input.history,
+    // A successor added while the predecessor's term was never closed, and a stray overlap.
+    { ...term('Q20', 'New Defense Person', '2025-06-01'), personQid: 'Q8001' },
+    { ...term('Q20', 'Overlapping Person', '2024-01-01', '2026-06-01'), personQid: 'Q8002' },
+    // The same term listed again for a second party is not another holder.
+    { ...term('Q20', 'New Defense Person', '2025-06-01'), personQid: 'Q8001', partyLabel: 'Second party' },
+    // Ended before the date: not listed.
+    { ...term('Q20', 'Former Person', '2010-01-01', '2015-01-01'), personQid: 'Q8003' },
+  ];
+  const defense = assembleDepartments(input).departments.find((d) => d.qid === 'D2')!;
+  const head = defense.heads[0];
+  assert.equal(head.officeholder?.personName, 'New Defense Person');
+  assert.deepEqual(head.otherHolders?.map((h) => h.personName).sort(), ['Defense Person', 'Overlapping Person']);
+  // An office with one holder has no list at all.
+  assert.equal(assembleDepartments(baseInput()).departments.find((d) => d.qid === 'D1')!.heads[0].otherHolders, undefined);
+});

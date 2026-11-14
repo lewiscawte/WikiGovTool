@@ -184,6 +184,43 @@ export function holderLine(className, officeholder, onAdd) {
   return line;
 }
 
+// Everyone else Wikidata records as holding the office on the date: overlapping or unclosed
+// terms. Each opens the office dialog on that holder, so their dates can be fixed. Null when
+// there's no one else. Red, as a mismatch: one office, several holders at once.
+export function otherHoldersList(entry, onOpen) {
+  const others = entry?.otherHolders ?? [];
+  if (others.length === 0) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'other-holders';
+  const heading = document.createElement('p');
+  heading.className = 'other-holders-heading';
+  heading.textContent = others.length === 1
+    ? 'Wikidata also records 1 other holder on this date:'
+    : `Wikidata also records ${others.length} other holders on this date:`;
+  const list = document.createElement('ul');
+  others.forEach((holder) => {
+    const li = document.createElement('li');
+    li.append(document.createTextNode(displayName(holder.personName)));
+    const tag = qidTag(holder.personWikidataQid);
+    if (tag) li.appendChild(tag);
+    const tenure = document.createElement('span');
+    tenure.className = 'tenure';
+    tenure.textContent = tenureLabel(holder);
+    li.appendChild(tenure);
+    if (onOpen) {
+      const fix = document.createElement('button');
+      fix.type = 'button';
+      fix.className = 'add-holder other-holders-fix';
+      fix.textContent = 'Fix dates';
+      fix.addEventListener('click', () => onOpen({ ...entry, officeholder: holder, otherHolders: [] }));
+      li.appendChild(fix);
+    }
+    list.appendChild(li);
+  });
+  wrap.append(heading, list);
+  return wrap;
+}
+
 // Small icon links to an item's Wikidata and English Wikipedia pages, shown opposite a dialog
 // heading. Each icon appears only when the page exists: pass the item's real enwiki sitelink,
 // never a title guessed from a name. Monochrome, since red is reserved for mismatches.
@@ -261,6 +298,8 @@ export function leadCard(entry, fallbackTitle, onOpen, onAddHolder) {
   if (officeQidTag) officeEl.appendChild(officeQidTag);
   const onAdd = entry && onAddHolder ? () => onAddHolder(entry) : null;
   text.append(officeEl, holderLine('lead-holder', entry?.officeholder, onAdd));
+  const others = otherHoldersList(entry, onOpen);
+  if (others) text.appendChild(others);
   const dd = deputiesDropdown(entry?.deputies);
   if (dd) text.appendChild(dd);
   card.append(photo, text);

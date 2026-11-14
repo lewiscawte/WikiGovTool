@@ -527,6 +527,16 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
 }
 .dept-succession > .btn { margin-top: var(--gap-2); }
 
+/* Several people recorded in one office on the same date: a mismatch to fix, so red. */
+.other-holders {
+  position: relative; z-index: 1;
+  margin-top: var(--gap-1); padding-left: var(--gap-2);
+  font: var(--t-xs) var(--sans); color: var(--red); box-shadow: inset 2px 0 0 var(--red);
+}
+.other-holders ul { list-style: none; margin: 2px 0 0; padding: 0; }
+.other-holders li { color: var(--ink); }
+.other-holders-heading { font-weight: 600; }
+
 /* ---------- Small screens ---------- */
 
 @media (max-width: 600px) {

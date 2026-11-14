@@ -24,6 +24,14 @@ document.body.insertAdjacentHTML('beforeend', `
           <input class="input" id="holderEnd" placeholder="YYYY-MM-DD">
         </div>
       </div>
+      <section class="edit-review" id="holderReview" hidden aria-labelledby="holderReviewTitle">
+        <h3 class="edit-review-title" id="holderReviewTitle">Review edit to Wikidata</h3>
+        <div id="holderReviewBody"></div>
+        <div class="edit-review-actions">
+          <button type="button" class="btn" id="holderReviewCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="holderReviewPublish">Publish to Wikidata</button>
+        </div>
+      </section>
       <p class="status-line" id="holderDialogStatus"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="holderDialogCancel">Cancel</button>
@@ -44,6 +52,17 @@ const endInput = document.getElementById('holderEnd');
 const statusEl = document.getElementById('holderDialogStatus');
 const saveBtn = document.getElementById('holderDialogSave');
 const QID_RE = /^Q[1-9]\d*$/;
+const reviewEl = document.getElementById('holderReview');
+const reviewBody = document.getElementById('holderReviewBody');
+const publishBtn = document.getElementById('holderReviewPublish');
+// The previewed Wikidata edit; Publish sends exactly this.
+let pendingEdit = null;
+
+function hideReview() {
+  reviewEl.hidden = true;
+  reviewBody.innerHTML = '';
+  pendingEdit = null;
+}
 
 // After any search: the person may not be on Wikidata at all.
 const createLine = createItemLine("Can't find them? Create a new Wikidata item for this person", () => {
@@ -118,6 +137,7 @@ function hiddenNote(hidden) {
 }
 
 function select(qid) {
+  if (qid !== selectedQid) hideReview();
   selectedQid = qid;
   saveBtn.disabled = !qid;
   resultsEl.querySelectorAll('.holder-result').forEach((row) => {
@@ -250,13 +270,21 @@ export function openAddOfficeholderDialog(entry, { onSave, start = '' } = {}) {
   onSaveCallback = onSave || (() => {});
   const office = officeTitle(entry.position.title);
   titleEl.textContent = `Add officeholder: ${office}`;
-  const situation = entry.officeholder?.personName
-    ? `A locally added officeholder shows on dates Wikidata records no holder for, so end the current holder's term first.`
-    : `Wikidata records no holder of this office on ${currentDate}.`;
+  const onWikidata = Boolean(entry.position.wikidataQid);
+  const situation = !entry.officeholder?.personName
+    ? `Wikidata records no holder of this office on ${currentDate}.`
+    : onWikidata
+      ? 'They\'re added alongside the current holder; if that term is over, give it an end date in the office dialog.'
+      : 'A locally added officeholder shows on dates Wikidata records no holder for, so end the current holder\'s term first.';
   introEl.textContent = `${situation} Find the person on Wikipedia `
     + 'or Wikidata. Only people (Wikidata "instance of: human") alive on that date, or on the term\'s dates once '
     + 'entered, are listed, and anyone Wikidata already records in this office comes first. The term can be any '
-    + 'dates, past ones included. This is saved locally; nothing is written to Wikidata.';
+    + 'dates, past ones included. '
+    + (onWikidata
+      ? 'It\'s saved to Wikidata, after a preview: position held on the person and officeholder on the office.'
+      : 'This office has no Wikidata item, so it\'s saved locally; nothing is written to Wikidata.');
+  saveBtn.textContent = onWikidata ? 'Preview Wikidata edit' : 'Add officeholder';
+  hideReview();
   searchInput.value = '';
   resultsEl.innerHTML = '';
   createLine.hidden = true;
@@ -282,8 +310,119 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
 });
 
+// After a save: close, or say why the page won't show them on the date being viewed.
+async function saved(startDate, endDate) {
+  // A term that doesn't cover the date being viewed (a past one, say) is saved all the same;
+  // it shows on the dates it does cover. Say so, since the page won't show it now.
+  const covers = !(startDate && startDate > currentDate) && !(endDate && endDate < currentDate.slice(0, endDate.length));
+  if (covers) close();
+  else setStatus(statusEl, `Added for ${startDate || 'an unknown start'} – ${endDate || 'present'}. That doesn't include ${currentDate}, `
+    + 'the date you\'re viewing, so it shows on the page only for dates in that range.');
+  await onSaveCallback();
+}
+
+function renderReview({ plan, username, tags }, request) {
+  reviewBody.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.textContent = `As ${username}:`;
+  reviewBody.appendChild(intro);
+  const sides = [[plan.person, 'position held (P39)'], [plan.office, 'officeholder (P1308)']];
+  for (const [side, statement] of sides) {
+    const heading = document.createElement('p');
+    const link = document.createElement('a');
+    link.href = `https://www.wikidata.org/wiki/${side.entityQid}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = `${side.entityLabel} (${side.entityQid})`;
+    heading.append('On ', link, ':');
+    const list = document.createElement('ul');
+    list.className = 'edit-review-changes';
+    const line = (text) => list.appendChild(Object.assign(document.createElement('li'), { textContent: text }));
+    if (side.needsChoice) {
+      line(`Wikidata has several ${statement} statements that could be this term. Save it from the office dialog, which lets you pick one.`);
+    } else {
+      if (!side.statementId) line(`Add a new ${statement} statement`);
+      side.changes.forEach((c) => line(`${c.from ? 'Change' : 'Add'} ${c.label} (${c.property}): ${c.from ? `${c.from} → ` : ''}${c.to}${c.copiedFrom ? ` (copied from ${c.copiedFrom})` : ''}`));
+      if (side.statementId && side.changes.length === 0) line('Already has this term. Nothing to change.');
+    }
+    reviewBody.append(heading, list);
+  }
+  const blocked = plan.person.needsChoice || plan.office.needsChoice;
+  const hasWork = (side) => !side.statementId || side.changes.length > 0;
+  const nothing = !hasWork(plan.person) && !hasWork(plan.office);
+  const note = document.createElement('p');
+  note.className = 'edit-review-note';
+  note.textContent = tags ? `Tagged: ${tags}.` : 'No edit tag is configured.';
+  reviewBody.appendChild(note);
+  pendingEdit = blocked || nothing ? null : {
+    ...request,
+    statementId: plan.person.statementId,
+    officeStatementId: plan.office.statementId,
+    baseRevId: plan.person.baseRevId,
+    officeBaseRevId: plan.office.baseRevId,
+  };
+  publishBtn.hidden = !pendingEdit;
+  publishBtn.disabled = false;
+  reviewEl.hidden = false;
+}
+
+async function previewWikidataEdit() {
+  const read = (input, label) => {
+    const value = dateForWikidata(input.value);
+    if (value === null) throw new Error(`Can't read "${input.value}" as the ${label} date. Use YYYY-MM-DD, YYYY-MM or YYYY.`);
+    return value;
+  };
+  let request;
+  try {
+    request = {
+      personQid: selectedQid,
+      positionQid: currentEntry.position.wikidataQid,
+      start: read(startInput, 'took office'),
+      end: read(endInput, 'left office'),
+      newTerm: true,
+    };
+  } catch (err) {
+    setStatus(statusEl, err.message, true);
+    return;
+  }
+  setStatus(statusEl, 'Checking Wikidata…');
+  try {
+    const preview = await api('/api/wikidata/term/preview', { method: 'POST', body: JSON.stringify(request) });
+    if (selectedQid !== request.personQid) return;
+    setStatus(statusEl, '');
+    renderReview(preview, request);
+  } catch (err) {
+    setStatus(statusEl, err.status === 401 ? 'Log in with Wikimedia first.' : err.message, true);
+  }
+}
+
+publishBtn.addEventListener('click', async () => {
+  if (!pendingEdit) return;
+  const edit = pendingEdit;
+  publishBtn.disabled = true;
+  setStatus(statusEl, 'Publishing to Wikidata…');
+  try {
+    await api('/api/wikidata/term/save', { method: 'POST', body: JSON.stringify(edit) });
+    hideReview();
+    setStatus(statusEl, '');
+    await saved(edit.start, edit.end);
+  } catch (err) {
+    publishBtn.disabled = false;
+    const partial = err.body?.revisions?.length ? ` ${err.body.revisions.length} edit(s) went through before this; check the items' history.` : '';
+    setStatus(statusEl, (err.status === 401 ? 'Log in with Wikimedia first.' : err.message) + partial, true);
+  }
+});
+
+document.getElementById('holderReviewCancel').addEventListener('click', hideReview);
+[startInput, endInput].forEach((input) => input.addEventListener('input', hideReview));
+
 saveBtn.addEventListener('click', async () => {
   if (!currentEntry || !selectedQid) return;
+  // An office on Wikidata gets the term there, on both items, after a preview.
+  if (currentEntry.position.wikidataQid) {
+    await previewWikidataEdit();
+    return;
+  }
   // Read like every other date ("7 February 2023" too), but a local fill needs the full day.
   const startDate = dateForWikidata(startInput.value) ?? startInput.value.trim();
   const endDate = dateForWikidata(endInput.value) ?? endInput.value.trim();
@@ -305,13 +444,7 @@ saveBtn.addEventListener('click', async () => {
         endDate: endDate || null,
       }),
     });
-    // A term that doesn't cover the date being viewed (a past one, say) is saved all the same;
-    // it shows on the dates it does cover. Say so, since the page won't show it now.
-    const covers = !(startDate && startDate > currentDate) && !(endDate && endDate < currentDate);
-    if (covers) close();
-    else setStatus(statusEl, `Added for ${startDate || 'an unknown start'} – ${endDate || 'present'}. That doesn't include ${currentDate}, `
-      + 'the date you\'re viewing, so it shows on the page only for dates in that range.');
-    await onSaveCallback();
+    await saved(startDate, endDate);
   } catch (err) {
     setStatus(statusEl, err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't add the officeholder: ${err.message}`, true);
   }

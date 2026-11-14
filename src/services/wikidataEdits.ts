@@ -130,6 +130,10 @@ export interface TermPlan {
 export interface StatementChoice {
   person?: string | null;
   office?: string | null;
+  // Adding someone to the office rather than editing a term they already have: an existing
+  // statement is only used if it's for this term (shares a typed date); otherwise a new one is
+  // created, so an earlier term's dates are never overwritten.
+  newTerm?: boolean;
 }
 
 // One qualifier's current state, as shown to the user.
@@ -199,8 +203,22 @@ export function planTermEdit(
   const plan: TermPlan = { person: person.side, office: office.side, conflicts: [] };
   const typed: Record<TermProperty, TimeInput | null> = { P580: start, P582: end };
 
+  // Statements that already record this term: they share a typed date.
+  const sharesDate = (claims: any[], known: (p: TermProperty) => { time: string; precision: number } | null | undefined) =>
+    claims.filter((c) => {
+      const term = termOf(c);
+      return (['P580', 'P582'] as const).some((p) => sameTime(term[p].time, known(p) ?? undefined));
+    });
+
   let personClaim = chosenClaim(person.side, person.claims, choice.person);
-  if (!personClaim && person.claims.length === 1) personClaim = person.claims[0];
+  if (!personClaim && choice.newTerm) {
+    const matching = sharesDate(person.claims, (p) => typed[p]);
+    if (matching.length === 1) personClaim = matching[0];
+    else if (matching.length > 1) {
+      person.side.needsChoice = true;
+      return plan;
+    }
+  } else if (!personClaim && person.claims.length === 1) personClaim = person.claims[0];
   else if (!personClaim && person.claims.length > 1) {
     // The office side is matched against the person's term, so it waits for this choice.
     person.side.needsChoice = true;
@@ -209,15 +227,16 @@ export function planTermEdit(
   person.side.statementId = personClaim?.id ?? null;
   const personTerm = termOf(personClaim);
 
+  const known = (p: TermProperty) => typed[p] ?? personTerm[p].time;
   let officeClaim = chosenClaim(office.side, office.claims, choice.office);
-  if (!officeClaim && office.claims.length === 1) officeClaim = office.claims[0];
+  if (!officeClaim && choice.newTerm) {
+    const matching = sharesDate(office.claims, known);
+    if (matching.length === 1) officeClaim = matching[0];
+    else if (matching.length > 1) office.side.needsChoice = true;
+  } else if (!officeClaim && office.claims.length === 1) officeClaim = office.claims[0];
   else if (!officeClaim && office.claims.length > 1) {
     // Several terms in office: take the one sharing a date with this term, if exactly one does.
-    const known = (p: TermProperty) => typed[p] ?? personTerm[p].time;
-    const matching = office.claims.filter((c) => {
-      const term = termOf(c);
-      return (['P580', 'P582'] as const).some((p) => sameTime(term[p].time, known(p) ?? undefined));
-    });
+    const matching = sharesDate(office.claims, known);
     if (matching.length === 1) officeClaim = matching[0];
     else office.side.needsChoice = true;
   }

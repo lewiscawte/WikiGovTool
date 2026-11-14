@@ -221,3 +221,31 @@ test('an office that already matches has nothing to send', () => {
     parseDateInput('1950', 's'), null);
   assert.equal(planHasWork(plan), false);
 });
+
+// Adding someone to the office (newTerm) rather than editing a term they already have.
+
+test('adding a person who held the office before creates a new term, leaving the old one alone', () => {
+  const earlier = p39('S1', 'Q2287650', { P580: [timeSnak('h1', '+1941-00-00T00:00:00Z', 9)], P582: [endSnak('h2', '+1945-00-00T00:00:00Z', 9)] });
+  const oldListing = p1308('O1', 'Q1297519', { P580: [timeSnak('h3', '+1941-00-00T00:00:00Z', 9)] });
+  const plan = planTermEdit(person([earlier]), office([oldListing]), parseDateInput('1950-01-19', 's'), null, { newTerm: true });
+  assert.equal(plan.person.statementId, null);
+  assert.equal(plan.office.statementId, null);
+  assert.deepEqual(plan.person.changes.map((c) => [c.property, c.from, c.to]), [['P580', null, '1950-01-19']]);
+  assert.deepEqual(plan.office.changes.map((c) => [c.property, c.from, c.to]), [['P580', null, '1950-01-19']]);
+});
+
+test('adding a term Wikidata already has on one side uses that statement instead of a duplicate', () => {
+  const listed = p1308('O1', 'Q1297519', { P580: [timeSnak('h', '+1950-01-19T00:00:00Z', 11)] });
+  const plan = planTermEdit(person([]), office([listed]), parseDateInput('1950-01-19', 's'), null, { newTerm: true });
+  assert.equal(plan.person.statementId, null);
+  assert.equal(plan.office.statementId, 'O1');
+  assert.equal(plan.office.changes.length, 0);
+  assert.equal(planHasWork(plan), true);
+});
+
+test('adding someone with no dates yet still creates both statements', () => {
+  const plan = planTermEdit(person([]), office([]), null, null, { newTerm: true });
+  assert.equal(plan.person.statementId, null);
+  assert.equal(plan.office.statementId, null);
+  assert.equal(planHasWork(plan), true);
+});

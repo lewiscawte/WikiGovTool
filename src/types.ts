@@ -52,6 +52,9 @@ export interface OfficeholderTerm {
 export interface OrgChartEntry {
   position: OrgChartPosition;
   officeholder: OfficeholderTerm | null;
+  // Other people Wikidata records as holding the office on the same date: overlapping or
+  // unclosed terms, listed so they can be fixed. Absent when there are none.
+  otherHolders?: OfficeholderTerm[];
   // Junior/deputy roles (Wikidata P2098) nested under this office rather than listed as
   // their own top-level entries — e.g. Vice President under President. Always empty on an
   // entry that is itself someone else's deputy (those never appear at the top level).

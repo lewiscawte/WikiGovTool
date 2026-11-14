@@ -1,6 +1,6 @@
 // Offices page: every cabinet-level office as a flat list.
 import {
-  api, cabinetLabelFor, deputiesDropdown, holderLine, initMasthead, leadCard, officeButton,
+  api, cabinetLabelFor, deputiesDropdown, holderLine, initMasthead, leadCard, officeButton, otherHoldersList,
   officeholderImageEl, qidTag, state, US_QID,
 } from './shared.js';
 import { openAddOfficeDialog, openOfficeDialog } from './officeDialog.js';
@@ -60,6 +60,8 @@ function officeRow(entry) {
   dept.textContent = position.department;
 
   row.append(officeholderImageEl(officeholder, 96, 'portrait portrait-sm'), title, linkState, dept, holderLine('office-holder', officeholder, () => addHolder(entry)));
+  const others = otherHoldersList(entry, open);
+  if (others) row.appendChild(others);
   const dd = deputiesDropdown(entry.deputies);
   if (dd) row.appendChild(dd);
   return row;

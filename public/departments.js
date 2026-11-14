@@ -1,7 +1,7 @@
 // Departments page: the government grouped by department/ministry, each card showing the
 // office that runs it and the other offices within it.
 import {
-  api, cabinetLabelFor, holderLine, initMasthead, leadCard, officeButton, officeholderImageEl, qidTag,
+  api, cabinetLabelFor, holderLine, initMasthead, leadCard, officeButton, officeholderImageEl, otherHoldersList, qidTag,
 } from './shared.js';
 import { openOfficeDialog } from './officeDialog.js';
 import { openAddDepartmentDialog, openEditDepartmentDialog } from './departmentDialog.js';
@@ -47,6 +47,8 @@ function headBlock(entry) {
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
   text.append(title, holderLine('department-head-holder', entry.officeholder, () => addHolder(entry)));
+  const others = otherHoldersList(entry, open);
+  if (others) text.appendChild(others);
   block.append(officeholderImageEl(entry.officeholder, 112, 'portrait portrait-md'), text);
   return block;
 }
@@ -60,6 +62,8 @@ function officeItem(entry) {
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
   item.append(title, holderLine('department-office-holder', entry.officeholder, () => addHolder(entry)));
+  const others = otherHoldersList(entry, open);
+  if (others) item.appendChild(others);
   return item;
 }
 
@@ -144,6 +148,8 @@ function unassignedRow(entry) {
   const officeQid = qidTag(entry.position.wikidataQid);
   if (officeQid) title.appendChild(officeQid);
   row.append(officeholderImageEl(entry.officeholder, 96, 'portrait portrait-sm'), title, holderLine('office-holder', entry.officeholder, () => addHolder(entry)));
+  const others = otherHoldersList(entry, open);
+  if (others) row.appendChild(others);
   return row;
 }
 

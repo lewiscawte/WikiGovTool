@@ -28,9 +28,13 @@ came from.
   term dates copied from Wikipedia are cited with the exact article revision (P143 + P4656).
   Dates can be typed as YYYY, YYYY-MM or YYYY-MM-DD, or as written on Wikipedia
   ("7 February 2023").
-- **Local additions for gaps.** Missing officeholders, offices and departments can be added
-  locally (searching Wikipedia and Wikidata, limited to people alive on the date). These are
-  kept in memory only, never written to Wikidata, and labelled as local.
+- **Adding officeholders.** "Add officeholder" searches Wikipedia and Wikidata for the person
+  (limited to people alive on the term's dates) and, for an office with a Wikidata item, saves
+  the term there after a preview: position held on the person and officeholder on the office.
+  When Wikidata records several people in one office on the same date, all of them are shown,
+  each with a link to fix their dates.
+- **Local additions for gaps.** Offices and departments without a Wikidata item, and holders of
+  such offices, can be added locally. These are kept in memory only and labelled as local.
 
 ## How it works
 
