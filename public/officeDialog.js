@@ -608,7 +608,7 @@ function termRequest(choice = {}) {
   return {
     personQid: start || end ? personQid : null, positionQid: position.wikidataQid, start, end,
     statementId: choice.statementId ?? null, officeStatementId: choice.officeStatementId ?? null, sources,
-    officeInception, officeDissolved,
+    officeInception, officeDissolved, countryQid: state.countryQid,
   };
 }
 

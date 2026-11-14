@@ -106,6 +106,9 @@ them all with their defaults.
 | `CACHE_COUNTRIES_TTL_MS` | How long the country list stays fresh (default 7 days) |
 | `CACHE_STALE_MS` | How long past those an entry can still be shown while it's refreshed in the background (default 7 days, 0 to disable) |
 | `REDIS_URL`, `REDIS_KEY_PREFIX` | Optional. Keeps the cache across restarts; without both, it's memory only |
+| `STATS_DB_NAME` | Optional. The MySQL/MariaDB database for usage statistics; without it, none are kept |
+| `STATS_DB_HOST`, `STATS_DB_PORT` | Where that database is (default `tools.db.svc.wikimedia.cloud:3306`, ToolsDB) |
+| `STATS_DB_USER`, `STATS_DB_PASSWORD`, `STATS_DB_CNF` | Its login; by default the `[client]` user and password from `~/replica.my.cnf` |
 
 ### OAuth
 
@@ -148,6 +151,26 @@ the output of `openssl rand -hex 32`. Every tool can read and overwrite that ins
 prefix must stay secret, and only public data may go in it: never sessions, which hold OAuth
 tokens. Cache activity is logged with `[cache]` and `[upstream]` prefixes.
 
+### Usage statistics
+
+New items and edits made through the tool are counted in
+[ToolsDB](https://wikitech.wikimedia.org/wiki/Help:Toolforge/ToolsDB) and shown at
+`/stats.html` (linked from the footer): by type, by user and by month. One row is kept per
+Wikidata revision, with only what's public on Wikidata already: the user name, the item, the
+revision and its time, plus the country being viewed. To switch it on:
+
+```sh
+# As the tool, create the database (its name must start with your ToolsDB user name):
+sql tools
+CREATE DATABASE s55555__wikigovtool;   -- use the user from ~/replica.my.cnf
+```
+
+then set `STATS_DB_NAME=s55555__wikigovtool` and restart. The table is created on first use.
+Edits from before then can be counted, as far back as Wikidata's recent changes go (30 days),
+with `npm run backfill-stats -- <OAuth consumer id>`; running it again skips edits it already
+has. Recording never holds up or fails an edit: database problems are only logged, with a
+`[stats]` prefix.
+
 ## Project layout
 
 ```
@@ -155,6 +178,7 @@ src/
   routes/       HTTP endpoints (/api/...)
   services/     Wikidata and Wikipedia access, org chart and department assembly, edits
   store/        In-memory local additions
+  scripts/      Command-line jobs (statistics backfill)
   data/         The curated US cabinet list
 public/         The frontend: pages, styles and dialogs
 test/           Tests (node:test, run with tsx)

@@ -520,6 +520,7 @@ function departmentEditRequest() {
     formedFrom: formed.map((read) => read()).filter(Boolean),
     dissolvedInto: dissolved.map((read) => read()).filter(Boolean),
     sourceUrl: successionSource.value.trim(),
+    countryQid: state.countryQid,
   };
 }
 

@@ -1,6 +1,6 @@
 // The "Add officeholder" dialog: fills an office Wikidata records no holder for, by searching
 // Wikidata and Wikipedia for the person. Importing this module adds the dialog to the page.
-import { api, currentDateParam, dateForWikidata, officeholderImageEl, officeTitle } from './shared.js';
+import { api, currentDateParam, dateForWikidata, officeholderImageEl, officeTitle, state } from './shared.js';
 import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
@@ -380,6 +380,7 @@ async function previewWikidataEdit() {
       start: read(startInput, 'took office'),
       end: read(endInput, 'left office'),
       newTerm: true,
+      countryQid: state.countryQid,
     };
   } catch (err) {
     setStatus(statusEl, err.message, true);
