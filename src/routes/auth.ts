@@ -22,6 +22,21 @@ const client = new AuthorizationCode({
 
 export const authRouter = Router();
 
+// Where to send the user after login: the page they came from, if it's a path on this site.
+// Anything else (another site, "//evil.example", "/\\evil.example") goes to the home page, so
+// the login can't be used to redirect someone elsewhere.
+export function safeReturnTo(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length > 2000) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || /[\u0000-\u001f\\]/.test(raw)) return '/';
+  try {
+    const url = new URL(raw, 'http://localhost');
+    if (url.origin !== 'http://localhost') return '/';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
 // Stores the user's profile in the session, using the access token already in req.session.oauth.
 async function loadProfile(req: Request): Promise<void> {
   const oauth = req.session.oauth!;
@@ -67,7 +82,7 @@ function startLoggedInSession(req: Request, oauth: OAuthSession): Promise<void> 
 
 // Owner-only consumer login (OAUTH_OWNER_ONLY=true): no redirect, the session just takes the
 // consumer's own access token. For local testing — see config.oauth.ownerOnly.
-async function ownerOnlyLogin(req: Request, res: Response): Promise<void> {
+async function ownerOnlyLogin(req: Request, res: Response, returnTo: string): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     res.status(403).json({ error: 'Owner-only login is disabled in production' });
     return;
@@ -83,12 +98,14 @@ async function ownerOnlyLogin(req: Request, res: Response): Promise<void> {
     accessToken: config.oauth.ownerAccessToken,
     tokenType: 'Bearer',
   });
-  res.redirect('/');
+  res.redirect(returnTo);
 }
 
+// GET /api/auth/login?returnTo=/departments.html?country=Q924 — returnTo is where to come back to.
 authRouter.get('/login', (req, res, next) => {
+  const returnTo = safeReturnTo(req.query.returnTo);
   if (config.oauth.ownerOnly) {
-    ownerOnlyLogin(req, res).catch(next);
+    ownerOnlyLogin(req, res, returnTo).catch(next);
     return;
   }
 
@@ -102,6 +119,7 @@ authRouter.get('/login', (req, res, next) => {
 
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
+  req.session.oauthReturnTo = returnTo;
 
   // Omit scope entirely when unset (= the consumer's registered grants): simple-oauth2
   // would otherwise send the literal string "undefined".
@@ -129,6 +147,9 @@ authRouter.get('/callback', async (req, res, next) => {
     }
 
     delete req.session.oauthState;
+    // Read before the session is replaced by the logged-in one.
+    const returnTo = safeReturnTo(req.session.oauthReturnTo);
+    delete req.session.oauthReturnTo;
 
     const tokenParams = {
       code,
@@ -145,7 +166,7 @@ authRouter.get('/callback', async (req, res, next) => {
       tokenType: token.token_type || 'Bearer',
     });
 
-    res.redirect('/');
+    res.redirect(returnTo);
   } catch (err) {
     next(err);
   }

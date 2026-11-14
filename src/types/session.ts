@@ -17,6 +17,8 @@ declare module 'express-session' {
       tokenType?: string;
     };
     oauthState?: string;
+    // The page to go back to once login completes (a path on this site).
+    oauthReturnTo?: string;
     oauthCodeVerifier?: string;
   }
 }

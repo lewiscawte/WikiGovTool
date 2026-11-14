@@ -409,7 +409,9 @@ export function initMasthead({ load, rerender }) {
       await refreshLoginState();
       return;
     }
-    window.location.href = '/api/auth/login';
+    // Come back to this page, at the same country and date, once logged in.
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   });
 
   async function populateCountries() {
