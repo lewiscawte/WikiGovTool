@@ -72,6 +72,9 @@ export interface Department {
   offices: OrgChartEntry[];
   // Offices within the department that existed but had no recorded holder on the date.
   vacant: OrgChartEntry[];
+  // Added by a user through the department dialog (store/departmentStore.ts), so it's listed
+  // in full even before any offices are found for it.
+  added?: boolean;
 }
 
 export interface DepartmentsView {

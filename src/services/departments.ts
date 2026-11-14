@@ -91,8 +91,10 @@ export function assembleDepartments(input: AssembleInput): DepartmentsView {
   const departments: Department[] = [];
   const placedCabinetQids = new Set<string>();
 
-  // Merge in extra departments (local)
+  // Merge in extra departments (local). One with a Wikidata item already has its details
+  // fetched with the rest; one without is shown as the user entered it.
   const extraDepts = listExtraDepartments(input.country);
+  const addedQids = new Set(extraDepts.map((d) => d.qid));
   for (const extra of extraDepts) {
     if (!details.has(extra.qid)) {
       details.set(extra.qid, {
@@ -170,6 +172,7 @@ export function assembleDepartments(input: AssembleInput): DepartmentsView {
       heads,
       offices: memberEntries.filter((e) => e.officeholder),
       vacant: memberEntries.filter((e) => !e.officeholder),
+      ...(addedQids.has(dept.qid) ? { added: true } : {}),
     });
   }
 
@@ -199,6 +202,11 @@ export function preferClassDepartments(links: DepartmentLink[], classDepartments
   return links.filter((l) => !hasClassLink.has(l.positionQid) || classDepartments.has(l.departmentQid));
 }
 
+// Departments users added that have a Wikidata item, so their details and offices are fetched
+// like any other department's.
+const addedDepartmentQids = (countryQid: string) =>
+  listExtraDepartments(countryQid).map((d) => d.qid).filter((q) => /^Q[1-9]\d*$/.test(q));
+
 export async function buildDepartmentsView(date: Date, countryQid: string): Promise<DepartmentsView> {
   const cabinet = await loadCabinetPositions(countryQid);
   const cabinetQids = cabinet.map((p) => p.wikidataQid).filter((q): q is string => !!q);
@@ -213,7 +221,7 @@ export async function buildDepartmentsView(date: Date, countryQid: string): Prom
   // their own unless the country's department class includes them.
   const leaderQids = new Set(cabinet.filter(isLeader).map((p) => p.wikidataQid));
   const linkedDepartments = links.filter((l) => !leaderQids.has(l.positionQid)).map((l) => l.departmentQid);
-  const departmentQids = [...new Set([...linkedDepartments, ...classDepartments])];
+  const departmentQids = [...new Set([...linkedDepartments, ...classDepartments, ...addedDepartmentQids(countryQid)])];
 
   const [details, offices] = await Promise.all([
     fetchDepartmentDetails(departmentQids),
@@ -241,7 +249,7 @@ export async function refreshCountry(countryQid: string): Promise<{ offices: num
     fetchDepartmentLinks(cabinetQids),
     classQid ? fetchDepartmentsOfClass(classQid) : Promise.resolve([]),
   ]);
-  const departmentQids = [...new Set([...links.map((l) => l.departmentQid), ...classDepartments])];
+  const departmentQids = [...new Set([...links.map((l) => l.departmentQid), ...classDepartments, ...addedDepartmentQids(countryQid)])];
   const offices = await fetchDepartmentOffices(departmentQids);
   const officeQids = [...new Set([...cabinetQids, ...offices.map((o) => o.positionQid)])];
 

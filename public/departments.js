@@ -153,7 +153,8 @@ function render() {
   leadersEl.innerHTML = '';
   view.leaders.forEach((entry) => leadersEl.appendChild(leadCard(entry, entry.position.title, open, addHolder)));
 
-  const populated = view.departments.filter((d) => d.heads.length || d.offices.length || d.vacant.length);
+  // A department someone added is listed in full even before any offices are found for it.
+  const populated = view.departments.filter((d) => d.added || d.heads.length || d.offices.length || d.vacant.length);
   const empty = view.departments.filter((d) => !populated.includes(d));
 
   gridEl.innerHTML = '';

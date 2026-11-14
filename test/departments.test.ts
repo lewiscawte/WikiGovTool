@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assembleDepartments, AssembleInput, preferClassDepartments } from '../src/services/departments';
 import { OrgChartPosition } from '../src/types';
+import { addExtraDepartment } from '../src/store/departmentStore';
 import { PositionHistoryRow } from '../src/services/wikidataClient';
 
 const position = (qid: string, title: string, bucket: OrgChartPosition['bucket'] = 'Minister'): OrgChartPosition => ({
@@ -129,4 +130,28 @@ test('a term whose end date is "unknown value" on Wikidata is treated as ended, 
   input.history = input.history.map((r) => (r.positionQid === 'Q22' ? { ...r, endUnknown: true } : r));
   const defense = assembleDepartments(input).departments[1];
   assert.deepEqual(defense.vacant.map((o) => o.position.title).sort(), ['Assistant Secretary of Defense', 'Under Secretary of Defense']);
+});
+
+const added = (qid: string, label: string) => ({
+  qid, label, wikipediaTitle: null, inception: null, dissolved: null, heads: [], offices: [], vacant: [],
+});
+
+test('a department added through the dialog is listed even with no offices found', () => {
+  addExtraDepartment('Q900', added('Q77', 'Department of Widgets'));
+  const view = assembleDepartments({ ...baseInput(), country: 'Q900' });
+  const widgets = view.departments.find((d) => d.qid === 'Q77');
+  assert.equal(widgets?.label, 'Department of Widgets');
+  assert.equal(widgets?.added, true);
+  assert.equal(view.departments.find((d) => d.qid === 'D1')?.added, undefined);
+});
+
+test('an added department with a Wikidata item gets its details and offices like any other', () => {
+  addExtraDepartment('Q901', added('Q78', 'typed by the user'));
+  const input = baseInput();
+  input.country = 'Q901';
+  input.details.set('Q78', { qid: 'Q78', label: 'Department of Gadgets', wikipediaTitle: null, inception: null, dissolved: null });
+  input.offices.push({ departmentQid: 'Q78', positionQid: 'Q30', positionLabel: 'Minister without Portfolio', role: 'head' });
+  const gadgets = assembleDepartments(input).departments.find((d) => d.qid === 'Q78');
+  assert.equal(gadgets?.label, 'Department of Gadgets');
+  assert.deepEqual(gadgets?.heads.map((h) => h.officeholder?.personName), ['Portfolio Person']);
 });
