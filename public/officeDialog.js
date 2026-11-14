@@ -1,6 +1,8 @@
 // The office comparison dialog (Wikidata vs Wikipedia) and the add-office dialog, shared by
 // both pages. Importing this module adds the dialogs' markup to the page.
-import { api, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
+import {
+  api, dateForWikidata, MONTHS, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state,
+} from './shared.js';
 import { openAddOfficeholderDialog } from './officeholderDialog.js';
 import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
@@ -249,6 +251,9 @@ async function refreshInfobox() {
 }
 
 Object.values(dialogFields).forEach((input) => input.addEventListener('input', () => { refreshInfobox(); }));
+// Publish sends what was previewed, so a date changed after the preview needs a new one.
+[dialogFields.start, dialogFields.end, compareCells.inception.input, compareCells.dissolved.input]
+  .forEach((input) => input.addEventListener('input', () => hideReview()));
 
 export async function openOfficeDialog(entry, { onChange } = {}) {
   const { position, officeholder } = entry;
@@ -347,7 +352,7 @@ refreshOfficeBtn.addEventListener('click', async () => {
 document.getElementById('addHolderBtn').addEventListener('click', () => {
   if (!currentEntry) return;
   const entry = currentEntry;
-  const start = termDateForWikidata(dialogFields.end.value);
+  const start = dateForWikidata(dialogFields.end.value);
   const onSave = onDataChanged;
   closeDialog();
   openAddOfficeholderDialog(entry, { onSave, start: start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : '' });
@@ -408,13 +413,6 @@ document.getElementById('addOfficeSubmitBtn').addEventListener('click', async ()
 // A Wikidata-side value counts as "empty" for comparison purposes even when it's holding one
 // of our own placeholder strings ("Unknown", "Still exists", "Incumbent") rather than blank.
 const EMPTY_PLACEHOLDERS = new Set(['', 'unknown', 'still exists', 'incumbent']);
-
-const MONTHS = {
-  january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
-  july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
-  jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08',
-  sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
-};
 
 function normalizeDateForCompare(s) {
   if (!s) return s;
@@ -492,6 +490,7 @@ document.querySelectorAll('.copy-btn').forEach((btn) => {
     cell.input.value = cell.wiki.textContent;
     cell.wiki.classList.remove('mismatch');
     if (key in wikiSources && lastPulledArticle) wikiSources[key] = { ...lastPulledArticle, value: cell.input.value };
+    hideReview();
     refreshInfobox();
   });
 });
@@ -556,25 +555,6 @@ linkBtn.addEventListener('click', async () => {
   }
 });
 
-// Term dates as Wikidata takes them: "YYYY", "YYYY-MM" or "YYYY-MM-DD" at the precision the
-// text actually gives (so "March 1950" never becomes 1950-03-01). '' for blank; null if unreadable.
-function termDateForWikidata(text) {
-  const cleaned = (text || '').replace(/<[^>]+>/g, '').replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1').replace(/\[\[([^\]]+)\]\]/g, '$1').trim();
-  if (!cleaned) return '';
-  if (/^\d{4}(-\d{2}(-\d{2})?)?$/.test(cleaned)) return cleaned;
-  const pad = (n) => String(n).padStart(2, '0');
-  let m = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)\.?,?\s+(\d{4})$/);
-  if (m && MONTHS[m[2].toLowerCase()]) return `${m[3]}-${MONTHS[m[2].toLowerCase()]}-${pad(m[1])}`;
-  m = cleaned.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/);
-  if (m && MONTHS[m[1].toLowerCase()]) return `${m[3]}-${MONTHS[m[1].toLowerCase()]}-${pad(m[2])}`;
-  m = cleaned.match(/^([A-Za-z]+)\.?\s+(\d{4})$/);
-  if (m && MONTHS[m[1].toLowerCase()]) return `${m[2]}-${MONTHS[m[1].toLowerCase()]}`;
-  // Infobox templates such as {{start date|1950|1|19}}: only trust a full year|month|day.
-  m = cleaned.match(/\{\{[^{}|]+\|\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})\s*[|}]/);
-  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
-  return null;
-}
-
 for (const key of Object.keys(wikiSources)) {
   dialogFields[key].addEventListener('input', () => {
     if (wikiSources[key] && dialogFields[key].value !== wikiSources[key].value) wikiSources[key] = null;
@@ -606,20 +586,29 @@ function hideReview() {
   pendingEdit = null;
 }
 
-// choice: { statementId, officeStatementId }, the statements the user picked when several match.
+// What Save to Wikidata sends: the holder's term dates, if there's a holder, and the office's own
+// created / abolished dates. choice: { statementId, officeStatementId }, the statements the user
+// picked when several match.
 function termRequest(choice = {}) {
   const position = currentEntry?.position;
-  const personQid = currentEntry?.officeholder?.personWikidataQid;
+  const personQid = currentEntry?.officeholder?.personWikidataQid || null;
   if (!position?.wikidataQid) throw new Error('This office has no Wikidata item to save to.');
-  if (!personQid) throw new Error('There is no officeholder to save. Use "Add officeholder" to pick one first.');
-  const start = termDateForWikidata(dialogFields.start.value);
-  const end = termDateForWikidata(dialogFields.end.value);
-  if (start === null) throw new Error(`Can't read "${dialogFields.start.value}" as a date. Use YYYY-MM-DD.`);
-  if (end === null) throw new Error(`Can't read "${dialogFields.end.value}" as a date. Use YYYY-MM-DD.`);
+  const read = (input, label) => {
+    const value = dateForWikidata(input.value);
+    if (value === null) throw new Error(`Can't read "${input.value}" as the ${label} date. Use YYYY-MM-DD, YYYY-MM or YYYY.`);
+    return value;
+  };
+  const start = read(dialogFields.start, 'took office');
+  const end = read(dialogFields.end, 'left office');
+  const officeInception = read(compareCells.inception.input, 'created');
+  const officeDissolved = read(compareCells.dissolved.input, 'abolished');
+  if ((start || end) && !personQid) throw new Error('There is no officeholder to save term dates for. Use "Add officeholder" to pick one first.');
+  if (!start && !end && !officeInception && !officeDissolved) throw new Error('Enter a date to save.');
   const sources = { start: start ? sourceFor('start') : null, end: end ? sourceFor('end') : null };
   return {
-    personQid, positionQid: position.wikidataQid, start, end,
+    personQid: start || end ? personQid : null, positionQid: position.wikidataQid, start, end,
     statementId: choice.statementId ?? null, officeStatementId: choice.officeStatementId ?? null, sources,
+    officeInception, officeDissolved,
   };
 }
 
@@ -698,21 +687,39 @@ function renderSide(side, request) {
   return true;
 }
 
-function renderReview({ plan, username, tags }, request) {
+// The office's own dates, under their own heading.
+function renderOfficeDates(office, officeDates) {
+  const heading = document.createElement('p');
+  heading.append('On ', wikidataLink(office.qid, `${office.label} (${office.qid})`), ', the office itself:');
+  const list = document.createElement('ul');
+  list.className = 'edit-review-changes';
+  officeDates.forEach((c) => {
+    const li = document.createElement('li');
+    li.append(`${c.from ? 'Change' : 'Add'} ${c.label} (${c.field}): `);
+    if (c.from) li.append(Object.assign(document.createElement('del'), { textContent: c.from }), ' → ');
+    li.append(Object.assign(document.createElement('ins'), { textContent: c.to }));
+    if (c.referencesDropped) li.append(` (${c.referencesDropped === 1 ? 'its reference cites' : `its ${c.referencesDropped} references cite`} the old date, so ${c.referencesDropped === 1 ? 'it is' : 'they are'} removed)`);
+    list.appendChild(li);
+  });
+  reviewBody.append(heading, list);
+}
+
+function renderReview({ plan, officeDates, office, username, tags }, request) {
   reviewBody.innerHTML = '';
   const intro = document.createElement('p');
-  intro.textContent = `As ${username}, the term is saved on both the officeholder and the office:`;
+  intro.textContent = plan ? `As ${username}, the term is saved on both the officeholder and the office:` : `As ${username}:`;
   reviewBody.appendChild(intro);
 
   // The office side is only planned once the person's statement is settled.
-  const ready = renderSide(plan.person, request) && renderSide(plan.office, request);
+  const ready = !plan || (renderSide(plan.person, request) && renderSide(plan.office, request));
   if (!ready) {
     publishBtn.hidden = true;
     reviewEl.hidden = false;
     return;
   }
+  if (officeDates.length) renderOfficeDates(office, officeDates);
 
-  plan.conflicts.forEach((c) => {
+  (plan?.conflicts ?? []).forEach((c) => {
     const p = document.createElement('p');
     p.className = 'status-line error';
     p.textContent = `The two items disagree on the ${c.label}: ${c.person} on the officeholder, ${c.office} on the office. `
@@ -721,19 +728,25 @@ function renderReview({ plan, username, tags }, request) {
   });
 
   const hasWork = (side) => !side.statementId || side.changes.length > 0;
-  const nothing = !hasWork(plan.person) && !hasWork(plan.office);
+  const nothing = !(plan && (hasWork(plan.person) || hasWork(plan.office))) && officeDates.length === 0;
+  if (nothing) {
+    const p = document.createElement('p');
+    p.textContent = 'Wikidata already has these dates. Nothing to change.';
+    reviewBody.appendChild(p);
+  }
   const note = document.createElement('p');
   note.className = 'edit-review-note';
-  note.textContent = `Only the term dates are saved; name, party and the office fields are not. `
+  note.textContent = 'Saved: the term dates, and the office\'s created and abolished dates. A blank date leaves Wikidata as it is. '
+    + 'Name, party, title and department are not saved. '
     + (tags ? `Tagged: ${tags}.` : 'No edit tag is configured.');
   reviewBody.appendChild(note);
 
   pendingEdit = nothing ? null : {
     ...request,
-    statementId: plan.person.statementId,
-    officeStatementId: plan.office.statementId,
-    baseRevId: plan.person.baseRevId,
-    officeBaseRevId: plan.office.baseRevId,
+    statementId: plan?.person.statementId ?? null,
+    officeStatementId: plan?.office.statementId ?? null,
+    baseRevId: plan?.person.baseRevId ?? null,
+    officeBaseRevId: office.baseRevId,
   };
   publishBtn.hidden = nothing;
   publishBtn.disabled = false;
@@ -751,7 +764,8 @@ async function previewEdit(choice = {}) {
   setStatus(dialogStatus, 'Checking Wikidata…');
   try {
     const preview = await api('/api/wikidata/term/preview', { method: 'POST', body: JSON.stringify(request) });
-    if (currentEntry?.officeholder?.personWikidataQid !== request.personQid) return;
+    // The dialog may have moved on to another office while Wikidata was checked.
+    if (currentEntry?.position.wikidataQid !== request.positionQid) return;
     setStatus(dialogStatus, '');
     renderReview(preview, request);
   } catch (err) {

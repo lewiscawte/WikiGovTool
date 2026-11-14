@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { ReadThroughCache } from '../cache';
 import { upstreamJson } from './upstream';
-import { withRecentTermEdits } from '../store/recentTermEdits';
+import { withRecentOfficeDates, withRecentTermEdits } from '../store/recentTermEdits';
 
 const QID_RE = /^Q[1-9]\d*$/;
 const ENTITY_URI_PREFIX = 'http://www.wikidata.org/entity/';
@@ -203,7 +203,7 @@ export async function fetchPositionLifespans(qids: string[]): Promise<Map<string
   const validQids = uniqueValidQids(qids);
   if (validQids.length === 0) return new Map();
 
-  return lifespanCache.getMany(validQids, async (missing) => {
+  const lifespans = await lifespanCache.getMany(validQids, async (missing) => {
     const bindings = await runSparql(buildLifespanQuery(missing));
     const result = new Map<string, PositionLifespan>(missing.map((q) => [q, { inception: null, dissolved: null }]));
     for (const b of bindings) {
@@ -214,6 +214,7 @@ export async function fetchPositionLifespans(qids: string[]): Promise<Map<string
     }
     return result;
   });
+  return new Map([...lifespans].map(([qid, span]) => [qid, withRecentOfficeDates(qid, span)]));
 }
 
 export interface CabinetPosition {

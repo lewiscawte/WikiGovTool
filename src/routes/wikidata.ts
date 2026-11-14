@@ -6,6 +6,7 @@ import {
   createItem, fetchLabels, findPossibleDuplicates, parseNewItem, plannedStatements, PROPERTY_LABELS, referencedItems,
 } from '../services/wikidataCreate';
 import { SUCCESSION_LABELS, successionItems } from '../services/wikidataSuccession';
+import { applyItemDates, DateChange, DateProperty, planItemDate } from '../services/wikidataItemDates';
 import {
   applyDepartmentEdit, DepartmentEditPlan, departmentEditHasWork, parseDepartmentEdit, planDepartmentEdit,
 } from '../services/wikidataDepartmentEdit';
@@ -16,7 +17,7 @@ import {
 } from '../services/wikidataEdits';
 import { fetchRevisionTitle } from '../services/wikipediaClient';
 import { requireAuth } from '../middleware/requireAuth';
-import { recordTermEdit } from '../store/recentTermEdits';
+import { recordOfficeDates, recordTermEdit } from '../store/recentTermEdits';
 import { config } from '../config';
 
 const QID_RE = /^Q[1-9]\d*$/;
@@ -69,32 +70,51 @@ async function verifiedSource(raw: any, field: string): Promise<WikipediaSource 
   return { title: actual, revid };
 }
 
-// Officeholder term dates: start/end time qualifiers on the person's position held statement
-// and the office's officeholder statement. Both endpoints take { personQid, positionQid, start,
-// end, statementId?, officeStatementId?, sources? }; dates are "YYYY", "YYYY-MM" or
-// "YYYY-MM-DD", and an empty date is only filled in where one side has it and the other has
-// nothing. sources.start / sources.end ({ title, revid }) mark a date as copied from that
-// Wikipedia revision, which is then cited on the statements.
-async function planFromBody(body: any): Promise<{ plan: TermPlan; person: any }> {
-  const { personQid, positionQid, start, end, statementId, officeStatementId, sources } = body ?? {};
-  if (typeof personQid !== 'string' || !QID_RE.test(personQid)) throw new EditInputError('No officeholder Wikidata item to edit');
+// The office dialog's Save to Wikidata: the officeholder's term dates, as start/end time
+// qualifiers on the person's position held statement and the office's officeholder statement,
+// and the office's own inception / dissolved dates. Both endpoints take { personQid?,
+// positionQid, start, end, statementId?, officeStatementId?, sources?, officeInception,
+// officeDissolved }; dates are "YYYY", "YYYY-MM" or "YYYY-MM-DD". An empty term date is only
+// filled in where one side has it and the other has nothing; an empty office date leaves
+// Wikidata alone. sources.start / sources.end ({ title, revid }) mark a term date as copied
+// from that Wikipedia revision, which is then cited on the statements.
+interface OfficeSavePlan {
+  plan: TermPlan | null;
+  officeDates: DateChange[];
+  person: any;
+  office: any;
+}
+
+async function planFromBody(body: any): Promise<OfficeSavePlan> {
+  const { personQid, positionQid, start, end, statementId, officeStatementId, sources, officeInception, officeDissolved } = body ?? {};
   if (typeof positionQid !== 'string' || !QID_RE.test(positionQid)) throw new EditInputError('This office has no Wikidata item');
+  if (personQid != null && personQid !== '' && !(typeof personQid === 'string' && QID_RE.test(personQid))) {
+    throw new EditInputError('Invalid officeholder Wikidata item');
+  }
   const startValue = parseDateInput(start, 'Took office');
   const endValue = parseDateInput(end, 'Left office');
-  if (!startValue && !endValue) throw new EditInputError('Enter a took office or left office date to save');
   if (startValue && endValue && startValue.time > endValue.time) throw new EditInputError('Left office is before took office');
+  const inceptionValue = parseDateInput(typeof officeInception === 'string' ? officeInception : null, 'Created');
+  const dissolvedValue = parseDateInput(typeof officeDissolved === 'string' ? officeDissolved : null, 'Abolished');
+  if (inceptionValue && dissolvedValue && inceptionValue.time > dissolvedValue.time) throw new EditInputError('Abolished is before created');
+  const termDates = Boolean(startValue || endValue);
+  if (termDates && !personQid) throw new EditInputError('There is no officeholder to save term dates for');
+  if (!termDates && !inceptionValue && !dissolvedValue) throw new EditInputError('Enter a date to save');
   if (statementId != null && typeof statementId !== 'string') throw new EditInputError('Invalid statement id');
   if (officeStatementId != null && typeof officeStatementId !== 'string') throw new EditInputError('Invalid statement id');
   const verified: Partial<Record<TermProperty, WikipediaSource | null>> = {
     P580: startValue ? await verifiedSource(sources?.start, 'took office') : null,
     P582: endValue ? await verifiedSource(sources?.end, 'left office') : null,
   };
-  const [person, office] = await Promise.all([fetchEntityForEdit(personQid), fetchEntityForEdit(positionQid)]);
-  if (!person) throw new EditInputError(`${personQid} wasn't found on Wikidata`);
+  const [person, office] = await Promise.all([termDates ? fetchEntityForEdit(personQid) : null, fetchEntityForEdit(positionQid)]);
+  if (termDates && !person) throw new EditInputError(`${personQid} wasn't found on Wikidata`);
   if (!office) throw new EditInputError(`${positionQid} wasn't found on Wikidata`);
-  const plan = planTermEdit(person, office, startValue, endValue,
-    { person: statementId || null, office: officeStatementId || null }, verified);
-  return { plan, person };
+  const plan = termDates
+    ? planTermEdit(person, office, startValue, endValue, { person: statementId || null, office: officeStatementId || null }, verified)
+    : null;
+  const officeDates = [planItemDate(office, 'P571', inceptionValue), planItemDate(office, 'P576', dissolvedValue)]
+    .filter((c): c is DateChange => c !== null);
+  return { plan, officeDates, person, office };
 }
 
 const DATE_TEXT_RE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
@@ -123,8 +143,14 @@ function recordSavedTerm(plan: TermPlan, person: any): void {
 // What a save would change, for the user to confirm.
 wikidataRouter.post('/term/preview', requireAuth, async (req, res, next) => {
   try {
-    const { plan } = await planFromBody(req.body);
-    res.json({ plan, username: req.session.user?.username, tags: config.wikidataEditTags || null });
+    const { plan, officeDates, office } = await planFromBody(req.body);
+    res.json({
+      plan,
+      officeDates,
+      office: { qid: office.id, label: office.labels?.en?.value ?? office.id, baseRevId: office.lastrevid },
+      username: req.session.user?.username,
+      tags: config.wikidataEditTags || null,
+    });
   } catch (err) {
     if (err instanceof EditInputError) res.status(400).json({ error: err.message });
     else next(err);
@@ -133,24 +159,48 @@ wikidataRouter.post('/term/preview', requireAuth, async (req, res, next) => {
 
 wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
   try {
-    // Re-planned from the live item rather than trusting the previewed plan, and refused if
-    // the item changed since the preview, so the user only publishes what they reviewed.
-    const { plan, person } = await planFromBody(req.body);
+    // Re-planned from the live items rather than trusting the previewed plan, and refused if
+    // either changed since the preview, so the user only publishes what they reviewed.
+    const { plan, officeDates, person, office } = await planFromBody(req.body);
     const changed = [
-      Number(req.body?.baseRevId) !== plan.person.baseRevId ? plan.person.entityQid : null,
-      Number(req.body?.officeBaseRevId) !== plan.office.baseRevId ? plan.office.entityQid : null,
+      plan && Number(req.body?.baseRevId) !== plan.person.baseRevId ? plan.person.entityQid : null,
+      Number(req.body?.officeBaseRevId) !== office.lastrevid ? office.id : null,
     ].filter(Boolean);
     if (changed.length) {
       res.status(409).json({ error: `${changed.join(' and ')} changed on Wikidata since the preview. Review the edit again.` });
       return;
     }
-    if (plan.person.needsChoice) throw new EditInputError('Choose which position held statement to edit');
-    if (plan.office.needsChoice) throw new EditInputError('Choose which officeholder statement to edit');
-    if (!planHasWork(plan)) throw new EditInputError('Nothing to change: Wikidata already has these dates');
-    const applied = await applyTermPlan(req, plan);
-    recordSavedTerm(plan, person);
-    await invalidateOfficeholderHistory(plan.office.entityQid);
-    res.json({ applied, personQid: plan.person.entityQid });
+    if (plan?.person.needsChoice) throw new EditInputError('Choose which position held statement to edit');
+    if (plan?.office.needsChoice) throw new EditInputError('Choose which officeholder statement to edit');
+    const termWork = plan !== null && planHasWork(plan);
+    if (!termWork && officeDates.length === 0) throw new EditInputError('Nothing to change: Wikidata already has these dates');
+
+    const applied: { entityQid: string; baseRevId: number; revisions: number[] }[] = termWork ? await applyTermPlan(req, plan!) : [];
+    if (plan && termWork) {
+      recordSavedTerm(plan, person);
+      await invalidateOfficeholderHistory(office.id);
+    }
+    if (officeDates.length) {
+      // After the term's edits to the office, if any, so it continues from their revision.
+      const officeEdits = applied.find((a) => a.entityQid === office.id);
+      const baserevid = officeEdits?.revisions[officeEdits.revisions.length - 1] ?? office.lastrevid;
+      let revid: number;
+      try {
+        revid = await applyItemDates(req, office, baserevid, officeDates);
+      } catch (err) {
+        if (err instanceof WikidataApiError) err.completedRevisions = applied.flatMap((a) => a.revisions);
+        throw err;
+      }
+      if (officeEdits) officeEdits.revisions.push(revid);
+      else applied.push({ entityQid: office.id, baseRevId: office.lastrevid, revisions: [revid] });
+      const saved = (field: DateProperty) => officeDates.find((c) => c.field === field)?.to;
+      recordOfficeDates(office.id, {
+        ...(saved('P571') ? { inception: saved('P571') } : {}),
+        ...(saved('P576') ? { dissolved: saved('P576') } : {}),
+      });
+      await invalidateItem('office', office.id);
+    }
+    res.json({ applied, personQid: plan?.person.entityQid ?? null });
   } catch (err) {
     if (err instanceof EditInputError) res.status(400).json({ error: err.message });
     else if (err instanceof WikidataApiError) {

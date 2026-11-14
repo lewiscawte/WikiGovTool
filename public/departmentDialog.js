@@ -1,4 +1,4 @@
-import { api, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
+import { api, dateForWikidata, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
 import { createItemLine, itemPicker, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
@@ -364,6 +364,13 @@ refreshBtn.addEventListener('click', async () => {
   }
 });
 
+// A date field as Wikidata takes it; throws with the field's name if it can't be read.
+function readDate(input, label) {
+  const value = dateForWikidata(input.value);
+  if (value === null) throw new Error(`Can't read "${input.value}" as the ${label} date. Use YYYY-MM-DD, YYYY-MM or YYYY.`);
+  return value;
+}
+
 saveBtn.addEventListener('click', async () => {
   const label = labelInput.value.trim();
   if (!label) {
@@ -378,32 +385,44 @@ saveBtn.addEventListener('click', async () => {
   }
   const countryQid = state.countryQid || 'Q30';
   try {
+    const inception = readDate(inceptionInput, 'inception');
+    const dissolved = readDate(dissolvedInput, 'dissolved');
     if (mode === 'add') {
+      const qid = qidInput.value.trim();
       await api('/api/departments', {
         method: 'POST',
         body: JSON.stringify({
           countryQid,
-          qid: qidInput.value.trim() || undefined,
+          qid: qid || undefined,
           label,
           wikipediaTitle: wpInput.value.trim(),
-          inception: inceptionInput.value.trim() || undefined,
-          dissolved: dissolvedInput.value.trim() || undefined,
+          inception: inception || undefined,
+          dissolved: dissolved || undefined,
         }),
       });
+      await onSaveCallback();
+      if (QID_RE.test(qid)) {
+        // On the page now; anything typed here that Wikidata doesn't have yet is saved there
+        // next, after the usual preview.
+        mode = 'edit';
+        editQid = qid;
+        titleEl.textContent = 'Edit department';
+        addSection.style.display = 'none';
+        qidInput.readOnly = true;
+        saveBtn.textContent = 'Save to Wikidata';
+        successionEl.hidden = false;
+        await previewDepartmentEdit('Department added to the page. ');
+        return;
+      }
       setStatus('Department added.');
     } else {
       await api(`/api/departments/${editQid}`, {
         method: 'PUT',
-        body: JSON.stringify({
-          label,
-          wikipediaTitle: wpInput.value.trim(),
-          inception: inceptionInput.value.trim() || null,
-          dissolved: dissolvedInput.value.trim() || null,
-        }),
+        body: JSON.stringify({ label, wikipediaTitle: wpInput.value.trim(), inception: inception || null, dissolved: dissolved || null }),
       });
       setStatus('Department updated.');
+      await onSaveCallback();
     }
-    await onSaveCallback();
     setTimeout(close, 400);
   } catch (err) {
     setStatus(err.status === 401 ? 'Log in with Wikimedia first.' : `Error: ${err.message}`, true);
@@ -471,13 +490,14 @@ function successionRow(kind) {
   const reader = () => {
     const qid = dept.value();
     if (!qid) return null;
-    return { relation: relation.value, qid, partQid: part.value(), date: date.value.trim() };
+    return { relation: relation.value, qid, partQid: part.value(), date: readDate(date, 'formation or dissolution') };
   };
   remove.addEventListener('click', () => {
     list.splice(list.indexOf(reader), 1);
     row.remove();
     hideSuccessionReview();
   });
+  [dept.input, relation, part.input, date].forEach((el) => el.addEventListener('input', hideSuccessionReview));
   row.append(dept.element, relation, part.element, date, remove);
   list.push(reader);
   (kind === 'formed' ? formedRows : dissolvedRows).appendChild(row);
@@ -495,8 +515,8 @@ function departmentEditRequest() {
     departmentQid: editQid,
     label: labelInput.value.trim(),
     wikipediaTitle: wpInput.value.trim(),
-    inception: inceptionInput.value.trim(),
-    dissolved: dissolvedInput.value.trim(),
+    inception: readDate(inceptionInput, 'inception'),
+    dissolved: readDate(dissolvedInput, 'dissolved'),
     formedFrom: formed.map((read) => read()).filter(Boolean),
     dissolvedInto: dissolved.map((read) => read()).filter(Boolean),
     sourceUrl: successionSource.value.trim(),
@@ -558,21 +578,21 @@ function renderDepartmentReview({ plan, labels, propertyLabels, username, tags }
   successionReview.hidden = false;
 }
 
-async function previewDepartmentEdit() {
+async function previewDepartmentEdit(prefix = '') {
   let request;
   try {
     request = departmentEditRequest();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(prefix + err.message, true);
     return;
   }
-  setStatus('Checking Wikidata…');
+  setStatus(`${prefix}Checking Wikidata…`);
   try {
     const preview = await api('/api/wikidata/department/preview', { method: 'POST', body: JSON.stringify(request) });
-    setStatus('');
+    setStatus(prefix);
     renderDepartmentReview(preview, request);
   } catch (err) {
-    setStatus(err.status === 401 ? 'Log in with Wikimedia first.' : err.message, true);
+    setStatus(prefix + (err.status === 401 ? 'Log in with Wikimedia first.' : err.message), true);
   }
 }
 

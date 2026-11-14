@@ -92,7 +92,43 @@ export function withRecentTermEdits(positionQid: string, rows: PositionHistoryRo
   return result;
 }
 
+
+// An office's own dates (inception / dissolved) saved through this tool, laid over the cached
+// lifespans the same way and for the same reason as terms above.
+interface RecentOfficeDates {
+  inception?: string;
+  dissolved?: string;
+  expiresAt: number;
+}
+
+const officeDates = new Map<string, RecentOfficeDates>();
+
+export function recordOfficeDates(positionQid: string, dates: { inception?: string; dissolved?: string }): void {
+  const now = Date.now();
+  for (const [key, entry] of officeDates) if (entry.expiresAt <= now) officeDates.delete(key);
+  if (!officeDates.has(positionQid) && officeDates.size >= MAX_ENTRIES_PER_STORE) officeDates.delete(officeDates.keys().next().value as string);
+  officeDates.set(positionQid, { ...officeDates.get(positionQid), ...dates, expiresAt: now + MAX_AGE_MS });
+}
+
+export function withRecentOfficeDates(
+  positionQid: string,
+  lifespan: { inception: string | null; dissolved: string | null },
+): { inception: string | null; dissolved: string | null } {
+  const recent = officeDates.get(positionQid);
+  if (!recent || recent.expiresAt <= Date.now()) return lifespan;
+  const caughtUp = (['inception', 'dissolved'] as const).every((k) => recent[k] === undefined || matchesDate(lifespan[k], recent[k] as string));
+  if (caughtUp) {
+    officeDates.delete(positionQid);
+    return lifespan;
+  }
+  return {
+    inception: recent.inception !== undefined ? toSparqlDate(recent.inception) : lifespan.inception,
+    dissolved: recent.dissolved !== undefined ? toSparqlDate(recent.dissolved) : lifespan.dissolved,
+  };
+}
+
 // For tests.
 export function clearRecentTermEdits(): void {
   edits = [];
+  officeDates.clear();
 }

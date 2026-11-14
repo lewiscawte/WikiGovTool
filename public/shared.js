@@ -45,6 +45,8 @@ export async function api(path, opts) {
   return body;
 }
 
+export { dateForWikidata, MONTHS } from './dates.js';
+
 // Forgets the server's cached copy of an office, department, item or whole country, so the
 // next load fetches it from Wikidata. Needs login.
 export function refreshFromWikidata(scope, qid) {

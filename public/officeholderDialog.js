@@ -1,6 +1,6 @@
 // The "Add officeholder" dialog: fills an office Wikidata records no holder for, by searching
 // Wikidata and Wikipedia for the person. Importing this module adds the dialog to the page.
-import { api, currentDateParam, officeholderImageEl, officeTitle } from './shared.js';
+import { api, currentDateParam, dateForWikidata, officeholderImageEl, officeTitle } from './shared.js';
 import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
@@ -267,10 +267,11 @@ document.addEventListener('keydown', (e) => {
 
 saveBtn.addEventListener('click', async () => {
   if (!currentEntry || !selectedQid) return;
-  const startDate = startInput.value.trim();
-  const endDate = endInput.value.trim();
+  // Read like every other date ("7 February 2023" too), but a local fill needs the full day.
+  const startDate = dateForWikidata(startInput.value) ?? startInput.value.trim();
+  const endDate = dateForWikidata(endInput.value) ?? endInput.value.trim();
   if ((startDate && !ISO_DATE_RE.test(startDate)) || (endDate && !ISO_DATE_RE.test(endDate))) {
-    setStatus(statusEl, 'Dates must be YYYY-MM-DD.', true);
+    setStatus(statusEl, 'Dates must be a full day, e.g. 2023-02-07 or 7 February 2023.', true);
     return;
   }
   // The fill only shows on dates inside its tenure, so it must cover the date being viewed.

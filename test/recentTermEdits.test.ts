@@ -1,6 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clearRecentTermEdits, recordTermEdit, withRecentTermEdits } from '../src/store/recentTermEdits';
+import { clearRecentTermEdits, recordOfficeDates, recordTermEdit, withRecentOfficeDates, withRecentTermEdits } from '../src/store/recentTermEdits';
 import type { PositionHistoryRow } from '../src/services/wikidataClient';
 
 const OFFICE = 'Q16147337';
@@ -70,4 +70,18 @@ test('other offices are untouched', () => {
   edit();
   const rows = [{ ...row('Q31752753', '2021-03-31', null), positionQid: 'Q9' }];
   assert.equal(withRecentTermEdits('Q9', rows), rows);
+});
+
+test('an office\'s saved dates show over the cached lifespan until the query service has them', () => {
+  recordOfficeDates(OFFICE, { inception: '1961-12-09' });
+  const cached = { inception: '1961-01-01T00:00:00Z', dissolved: null };
+  assert.deepEqual(withRecentOfficeDates(OFFICE, cached), { inception: '1961-12-09T00:00:00Z', dissolved: null });
+  // Caught up: the saved value is forgotten, so a later change on Wikidata shows as it is.
+  assert.deepEqual(withRecentOfficeDates(OFFICE, { inception: '1961-12-09T00:00:00Z', dissolved: null }), { inception: '1961-12-09T00:00:00Z', dissolved: null });
+  assert.deepEqual(withRecentOfficeDates(OFFICE, cached), cached);
+});
+
+test('saving one office date leaves the other as Wikidata has it', () => {
+  recordOfficeDates(OFFICE, { dissolved: '2023' });
+  assert.deepEqual(withRecentOfficeDates(OFFICE, { inception: '1961-12-09T00:00:00Z', dissolved: null }), { inception: '1961-12-09T00:00:00Z', dissolved: '2023-01-01T00:00:00Z' });
 });

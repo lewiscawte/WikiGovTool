@@ -22,9 +22,12 @@ came from.
   the infobox on the office's and officeholder's Wikipedia articles. Values that differ are
   flagged, and a Wikipedia value can be copied across.
 - **Edits to Wikidata, reviewed first.** Logged-in editors can save an officeholder's term
-  dates (start time P580 / end time P582 on their position held P39 statement). Every edit is
-  shown for review before it's published, and dates copied from Wikipedia are cited with the
-  exact article revision (P143 + P4656).
+  dates (start time P580 / end time P582, on both the person's position held P39 statement and
+  the office's officeholder P1308 statement) and an office's or department's own dates
+  (inception P571 / dissolved P576). Every edit is shown for review before it's published, and
+  term dates copied from Wikipedia are cited with the exact article revision (P143 + P4656).
+  Dates can be typed as YYYY, YYYY-MM or YYYY-MM-DD, or as written on Wikipedia
+  ("7 February 2023").
 - **Local additions for gaps.** Missing officeholders, offices and departments can be added
   locally (searching Wikipedia and Wikidata, limited to people alive on the date). These are
   kept in memory only, never written to Wikidata, and labelled as local.

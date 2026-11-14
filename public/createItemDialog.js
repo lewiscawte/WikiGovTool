@@ -2,7 +2,7 @@
 // can't find. Each kind gets a few sensible statements, prefilled where the country or the
 // search already says what they should be. The server builds the item from these fields;
 // nothing is sent until the user has previewed it. Importing this module adds the dialog.
-import { api, state } from './shared.js';
+import { api, dateForWikidata, state } from './shared.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop dialog-backdrop-top" id="createItemBackdrop">
@@ -88,6 +88,18 @@ function textInput(key, labelText, { value = '', placeholder = '', wide = false 
   input.autocomplete = 'off';
   readers[key] = () => input.value.trim();
   return field(labelText, input, { wide });
+}
+
+// A date, read the same way as in the other dialogs ("7 February 2023" and so on).
+function dateInput(key, labelText, value = '') {
+  const wrap = textInput(key, labelText, { value, placeholder: 'YYYY-MM-DD' });
+  const input = wrap.querySelector('input');
+  readers[key] = () => {
+    const date = dateForWikidata(input.value);
+    if (date === null) throw new Error(`Can't read "${input.value}" as the ${labelText.toLowerCase()}. Use YYYY-MM-DD, YYYY-MM or YYYY.`);
+    return date;
+  };
+  return wrap;
 }
 
 function selectInput(key, labelText, choices, value = '') {
@@ -192,7 +204,7 @@ function renderPersonFields() {
     ),
     grid(
       selectInput('genderQid', 'Sex or gender', [['', 'Not set'], ['Q6581097', 'Male'], ['Q6581072', 'Female']]),
-      textInput('birthDate', 'Date of birth', { placeholder: 'YYYY-MM-DD' }),
+      dateInput('birthDate', 'Date of birth'),
     ),
     itemInput('partyQid', 'Political party', 'Search Wikidata for the party'),
     textInput('wikipediaTitle', 'English Wikipedia article, if there is one', { wide: true }),
@@ -203,8 +215,8 @@ function renderPersonFields() {
     fieldsEl.append(
       checkbox('holdsOffice', `Holds ${office.title} (position held on the person, officeholder on the office)`),
       grid(
-        textInput('heldStart', 'Took office', { value: options.start || '', placeholder: 'YYYY-MM-DD' }),
-        textInput('heldEnd', 'Left office', { value: options.end || '', placeholder: 'YYYY-MM-DD' }),
+        dateInput('heldStart', 'Took office', options.start || ''),
+        dateInput('heldEnd', 'Left office', options.end || ''),
       ),
     );
   }
@@ -218,7 +230,7 @@ function renderOfficeFields() {
     ),
     grid(
       selectInput('officeClassQid', 'Kind of office (subclass of)', OFFICE_CLASSES, 'Q83307'),
-      textInput('inception', 'Created', { placeholder: 'YYYY-MM-DD' }),
+      dateInput('inception', 'Created'),
     ),
     itemInput('departmentQid', 'Department it runs', 'Search Wikidata for the department'),
     textInput('wikipediaTitle', 'English Wikipedia article, if there is one', { wide: true }),
@@ -238,7 +250,7 @@ function renderDepartmentFields() {
     ),
     grid(
       selectInput('departmentClassQid', 'Kind of department (instance of)', classes, classes[0][0]),
-      textInput('inception', 'Created', { placeholder: 'YYYY-MM-DD' }),
+      dateInput('inception', 'Created'),
     ),
     itemInput('headOfficeQid', 'Office that heads it', 'Search Wikidata for the office'),
     grid(
