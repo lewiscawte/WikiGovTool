@@ -113,7 +113,7 @@ function lifeYears(person) {
 function hiddenNote(hidden) {
   const parts = [];
   if (hidden.notPerson) parts.push(`${hidden.notPerson} not a person on Wikidata`);
-  if (hidden.notAlive) parts.push(`${hidden.notAlive} not alive on ${currentDate}`);
+  if (hidden.notAlive) parts.push(`${hidden.notAlive} not alive on ${searchDate()}`);
   return parts.length ? `Hidden: ${parts.join(', ')}.` : '';
 }
 
@@ -195,7 +195,7 @@ async function runSearch(q) {
   setStatus(searchStatus, 'Searching…');
   const positionQid = currentEntry.position.wikidataQid;
   try {
-    const params = new URLSearchParams({ q, date: currentDate });
+    const params = new URLSearchParams({ q, date: searchDate() });
     if (positionQid) params.set('position', positionQid);
     const { results, hidden } = await api(`/api/officeholders/search?${params}`);
     if (request !== searchRequest) return;
@@ -213,6 +213,22 @@ async function runSearch(q) {
     setStatus(searchStatus, `Search failed: ${err.message}`, true);
   }
 }
+
+// People are searched for as alive on the term's own dates when they're given, so someone
+// from a past term who has since died is still found; otherwise on the date being viewed.
+function searchDate() {
+  for (const input of [startInput, endInput]) {
+    const date = dateForWikidata(input.value);
+    if (date && ISO_DATE_RE.test(date)) return date;
+  }
+  return currentDate;
+}
+
+// New dates can change who counts as alive, so search again.
+[startInput, endInput].forEach((input) => input.addEventListener('change', () => {
+  const q = searchInput.value.trim();
+  if (q) runSearch(q);
+}));
 
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimeout);
@@ -238,8 +254,9 @@ export function openAddOfficeholderDialog(entry, { onSave, start = '' } = {}) {
     ? `A locally added officeholder shows on dates Wikidata records no holder for, so end the current holder's term first.`
     : `Wikidata records no holder of this office on ${currentDate}.`;
   introEl.textContent = `${situation} Find the person on Wikipedia `
-    + 'or Wikidata. Only people (Wikidata "instance of: human") alive on that date are listed, and anyone '
-    + 'Wikidata already records in this office comes first. This is saved locally; nothing is written to Wikidata.';
+    + 'or Wikidata. Only people (Wikidata "instance of: human") alive on that date, or on the term\'s dates once '
+    + 'entered, are listed, and anyone Wikidata already records in this office comes first. The term can be any '
+    + 'dates, past ones included. This is saved locally; nothing is written to Wikidata.';
   searchInput.value = '';
   resultsEl.innerHTML = '';
   createLine.hidden = true;
@@ -274,9 +291,8 @@ saveBtn.addEventListener('click', async () => {
     setStatus(statusEl, 'Dates must be a full day, e.g. 2023-02-07 or 7 February 2023.', true);
     return;
   }
-  // The fill only shows on dates inside its tenure, so it must cover the date being viewed.
-  if ((startDate && startDate > currentDate) || (endDate && endDate < currentDate)) {
-    setStatus(statusEl, `The dates must include ${currentDate}, the date you're viewing.`, true);
+  if (startDate && endDate && startDate > endDate) {
+    setStatus(statusEl, 'Left office is before took office.', true);
     return;
   }
   try {
@@ -289,7 +305,12 @@ saveBtn.addEventListener('click', async () => {
         endDate: endDate || null,
       }),
     });
-    close();
+    // A term that doesn't cover the date being viewed (a past one, say) is saved all the same;
+    // it shows on the dates it does cover. Say so, since the page won't show it now.
+    const covers = !(startDate && startDate > currentDate) && !(endDate && endDate < currentDate);
+    if (covers) close();
+    else setStatus(statusEl, `Added for ${startDate || 'an unknown start'} – ${endDate || 'present'}. That doesn't include ${currentDate}, `
+      + 'the date you\'re viewing, so it shows on the page only for dates in that range.');
     await onSaveCallback();
   } catch (err) {
     setStatus(statusEl, err.status === 401 ? 'Log in with Wikimedia first.' : `Couldn't add the officeholder: ${err.message}`, true);
