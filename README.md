@@ -48,10 +48,12 @@ form with the usual statements for that kind of item. It's previewed, along with
 items of the same name, before anything is created, and a source URL given there is cited on the
 new statements.
 
-A department's formation and dissolution can be recorded from its edit dialog: one row per
-department it came from (replaces, separated from) or went to (replaced by, merged into), with
-the part concerned and the date as qualifiers. These are only ever added to Wikidata, after a
-preview, and "replaces" / "replaced by" are added to the other department too.
+Editing a department that has a Wikidata item saves to Wikidata, after a preview: its name,
+English Wikipedia article, inception and dissolved dates (a blank field leaves Wikidata alone),
+and its formation and dissolution, one row per department it came from (replaces, separated
+from) or went to (replaced by, merged into), with the part concerned and the date as
+qualifiers. Those links are only ever added, and "replaces" / "replaced by" are added to the
+other department too. A department without a Wikidata item is still edited locally.
 
 To see changes made on Wikidata sooner, log in and use "Refresh from Wikidata" in an office or
 department dialog, or add `?refresh=1` to the page address to refetch the whole country. Terms

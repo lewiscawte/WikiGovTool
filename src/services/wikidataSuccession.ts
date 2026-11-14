@@ -1,7 +1,4 @@
-import { Request } from 'express';
-import { config } from '../config';
-import { wikimediaApiPost } from './wikimediaAuth';
-import { EditInputError, formatTime, parseDateInput, TimeInput, timeValue, WikidataApiError } from './wikidataEdits';
+import { EditInputError, formatTime, parseDateInput, TimeInput, timeValue } from './wikidataEdits';
 
 // A department's formation and dissolution: which departments it came from and went to. One
 // statement per other department, so a department formed from parts of several, or split
@@ -66,14 +63,15 @@ function parseLinks(raw: unknown, allowed: SuccessionProperty[], field: string, 
 }
 
 // { departmentQid, formedFrom: [{ relation, qid, partQid?, date? }], dissolvedInto: [...], sourceUrl? }
-export function parseSuccession(body: any): SuccessionInput {
+// requireLinks: false when the links come with other changes to the department.
+export function parseSuccession(body: any, { requireLinks = true } = {}): SuccessionInput {
   const departmentQid = body?.departmentQid;
   if (typeof departmentQid !== 'string' || !QID_RE.test(departmentQid)) throw new EditInputError('This department has no Wikidata item');
   const links = [
     ...parseLinks(body.formedFrom, ['P1365', 'P807'], 'Formed from', departmentQid),
     ...parseLinks(body.dissolvedInto, ['P1366', 'P7888'], 'On dissolution', departmentQid),
   ];
-  if (links.length === 0) throw new EditInputError('Add a department it was formed from or dissolved into');
+  if (requireLinks && links.length === 0) throw new EditInputError('Add a department it was formed from or dissolved into');
   const sourceUrl = typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() : '';
   if (sourceUrl && (sourceUrl.length > 500 || !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(sourceUrl))) {
     throw new EditInputError('Source URL must be a web address starting http:// or https://');
@@ -167,34 +165,6 @@ export function statementData(s: PlannedSuccessionStatement, sourceUrl: string |
     ...(Object.keys(qualifiers).length ? { qualifiers, 'qualifiers-order': Object.keys(qualifiers) } : {}),
     ...(sourceUrl ? { references: [{ snaks: { [REFERENCE_URL]: [{ snaktype: 'value', property: REFERENCE_URL, datavalue: { type: 'string', value: sourceUrl } }] } }] } : {}),
   };
-}
-
-export interface AppliedSuccession {
-  entityQid: string;
-  baseRevId: number;
-  revid: number;
-}
-
-// One edit per department, each adding its new statements and based on the revision the
-// preview read, so a change by anyone else in between fails rather than being overwritten.
-export async function applySuccession(req: Request, plan: SuccessionPlan): Promise<AppliedSuccession[]> {
-  const applied: AppliedSuccession[] = [];
-  for (const side of plan.sides) {
-    const toAdd = side.statements.filter((s) => !s.existing);
-    if (toAdd.length === 0) continue;
-    const labels = [...new Set(toAdd.map((s) => SUCCESSION_LABELS[s.property]))].join(', ');
-    const data = await wikimediaApiPost(req, config.wikidataApi, {
-      action: 'wbeditentity',
-      id: side.entityQid,
-      baserevid: String(side.baseRevId),
-      data: JSON.stringify({ claims: toAdd.map((s) => statementData(s, plan.sourceUrl)) }),
-      summary: `Add ${labels} (department formation/dissolution) via WikiGovTool`,
-      ...(config.wikidataEditTags ? { tags: config.wikidataEditTags } : {}),
-    });
-    if (data?.error) throw new WikidataApiError(data.error.code, data.error.info, side.entityQid, applied.map((a) => a.revid));
-    applied.push({ entityQid: side.entityQid, baseRevId: side.baseRevId, revid: data.entity?.lastrevid });
-  }
-  return applied;
 }
 
 // Every item the plan mentions, to label them in the preview.

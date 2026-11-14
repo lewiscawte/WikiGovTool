@@ -5,9 +5,11 @@ import {
 import {
   createItem, fetchLabels, findPossibleDuplicates, parseNewItem, plannedStatements, PROPERTY_LABELS, referencedItems,
 } from '../services/wikidataCreate';
+import { SUCCESSION_LABELS, successionItems } from '../services/wikidataSuccession';
 import {
-  applySuccession, parseSuccession, planSuccession, SUCCESSION_LABELS, SuccessionPlan, successionHasWork, successionItems,
-} from '../services/wikidataSuccession';
+  applyDepartmentEdit, DepartmentEditPlan, departmentEditHasWork, parseDepartmentEdit, planDepartmentEdit,
+} from '../services/wikidataDepartmentEdit';
+import { setPublishedDepartment } from '../store/departmentStore';
 import {
   applyTermPlan, EditInputError, parseDateInput, planHasWork, planTermEdit, TermPlan, TermProperty, WikidataApiError,
   WikipediaSource,
@@ -210,21 +212,23 @@ wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
   }
 });
 
-// A department's formation and dissolution: { departmentQid, formedFrom, dissolvedInto,
-// sourceUrl? } (see parseSuccession). Statements are only added, never changed or removed.
-async function successionFromBody(body: any): Promise<SuccessionPlan> {
-  const input = parseSuccession(body);
-  const qids = [...new Set([input.departmentQid, ...input.links.map((l) => l.qid)])];
-  const entities = await Promise.all(qids.map((q) => fetchEntityForEdit(q)));
-  return planSuccession(input, new Map(qids.map((q, i) => [q, entities[i]] as const).filter(([, e]) => e)));
+// The department edit dialog: { departmentQid, label, wikipediaTitle, inception, dissolved,
+// formedFrom, dissolvedInto, sourceUrl? } (see parseDepartmentEdit). A blank field leaves
+// Wikidata alone, and links to other departments are only ever added.
+async function departmentEditFromBody(body: any): Promise<{ plan: DepartmentEditPlan; entities: Map<string, any> }> {
+  const input = parseDepartmentEdit(body);
+  const qids = [...new Set([input.succession.departmentQid, ...input.succession.links.map((l) => l.qid)])];
+  const fetched = await Promise.all(qids.map((q) => fetchEntityForEdit(q)));
+  const entities = new Map(qids.map((q, i) => [q, fetched[i]] as const).filter(([, e]) => e));
+  return { plan: planDepartmentEdit(input, entities), entities };
 }
 
-wikidataRouter.post('/succession/preview', requireAuth, async (req, res, next) => {
+wikidataRouter.post('/department/preview', requireAuth, async (req, res, next) => {
   try {
-    const plan = await successionFromBody(req.body);
+    const { plan } = await departmentEditFromBody(req.body);
     res.json({
       plan,
-      labels: await fetchLabels(successionItems(plan)),
+      labels: await fetchLabels(successionItems(plan.succession)),
       propertyLabels: SUCCESSION_LABELS,
       username: req.session.user?.username,
       tags: config.wikidataEditTags || null,
@@ -235,19 +239,26 @@ wikidataRouter.post('/succession/preview', requireAuth, async (req, res, next) =
   }
 });
 
-wikidataRouter.post('/succession/save', requireAuth, async (req, res, next) => {
+wikidataRouter.post('/department/save', requireAuth, async (req, res, next) => {
   try {
     // Re-planned from the live items, and refused if any changed since the preview.
-    const plan = await successionFromBody(req.body);
+    const { plan, entities } = await departmentEditFromBody(req.body);
     const previewed = req.body?.baseRevIds ?? {};
-    const changed = plan.sides.filter((s) => Number(previewed[s.entityQid]) !== s.baseRevId).map((s) => s.entityQid);
+    const changed = plan.succession.sides.filter((s) => Number(previewed[s.entityQid]) !== s.baseRevId).map((s) => s.entityQid);
     if (changed.length) {
       res.status(409).json({ error: `${changed.join(', ')} changed on Wikidata since the preview. Review the edit again.` });
       return;
     }
-    if (!successionHasWork(plan)) throw new EditInputError('Nothing to add: Wikidata already has these');
-    const applied = await applySuccession(req, plan);
-    await Promise.all(plan.sides.map((s) => invalidateItem('department', s.entityQid)));
+    if (!departmentEditHasWork(plan)) throw new EditInputError('Nothing to change: Wikidata already has all of this');
+    const applied = await applyDepartmentEdit(req, plan, entities);
+    // The page reads departments through the query service, which is minutes behind: show the
+    // published values meanwhile.
+    const value = (field: string) => plan.fields.find((f) => f.field === field)?.to;
+    const patch = Object.fromEntries(Object.entries({
+      label: value('label'), wikipediaTitle: value('wikipedia'), inception: value('P571'), dissolved: value('P576'),
+    }).filter(([, v]) => v !== undefined));
+    if (Object.keys(patch).length) setPublishedDepartment(plan.departmentQid, patch);
+    await Promise.all(plan.succession.sides.map((s) => invalidateItem('department', s.entityQid)));
     res.json({ applied });
   } catch (err) {
     if (err instanceof EditInputError) res.status(400).json({ error: err.message });
