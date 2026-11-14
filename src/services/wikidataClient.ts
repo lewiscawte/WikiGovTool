@@ -69,9 +69,10 @@ export async function purgeItems(qids: string[]): Promise<void> {
   await entityCache.purge(uniqueValidQids(qids));
 }
 
-// A just-created office or department: the query service doesn't have it yet, so what's
-// fetched about it is only kept briefly until it has (see ReadThroughCache.invalidate).
-export async function invalidateNewItem(kind: 'office' | 'department', qid: string): Promise<void> {
+// A just-created or just-edited office or department: the query service doesn't show the
+// change yet, so what's fetched about it is only kept briefly until it does (see
+// ReadThroughCache.invalidate).
+export async function invalidateItem(kind: 'office' | 'department', qid: string): Promise<void> {
   const caches = kind === 'office'
     ? [historyCache, lifespanCache, deputiesCache, departmentLinksCache]
     : [departmentDetailsCache, departmentOfficesCache, departmentProfileCache];
@@ -510,6 +511,8 @@ export interface DepartmentProfile {
   headOffice: LinkedItem[];
   replaces: LinkedItem[];
   replacedBy: LinkedItem[];
+  separatedFrom: LinkedItem[];
+  mergedInto: LinkedItem[];
 }
 
 const departmentProfileCache = structureCache<DepartmentProfile | null>('department-profile');
@@ -525,6 +528,8 @@ const PROFILE_LINKS: Record<string, keyof DepartmentProfile> = {
   P2388: 'headOffice',
   P1365: 'replaces',
   P1366: 'replacedBy',
+  P807: 'separatedFrom',
+  P7888: 'mergedInto',
 };
 
 export async function fetchDepartmentProfile(qid: string): Promise<DepartmentProfile | null> {
@@ -566,6 +571,7 @@ async function queryDepartmentProfile(qid: string): Promise<DepartmentProfile | 
     dissolved: s?.abolished?.value ?? null,
     website: s?.website?.value ?? null,
     instanceOf: [], country: [], parent: [], headquarters: [], headOffice: [], replaces: [], replacedBy: [],
+    separatedFrom: [], mergedInto: [],
   };
   for (const b of links) {
     const key = PROFILE_LINKS[b.prop.value.replace('http://www.wikidata.org/prop/direct/', '')];

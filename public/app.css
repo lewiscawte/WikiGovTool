@@ -518,9 +518,19 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
 }
 .create-item-result:hover { background: var(--paper); }
 
+/* Department formation and dissolution: one row per department it came from or went to. */
+.dept-succession { margin-top: var(--gap-4); }
+.dept-succession-heading { margin: var(--gap-3) 0 var(--gap-2); font: 600 var(--t-sm) var(--sans); }
+.succession-row {
+  display: grid; grid-template-columns: 2fr 1.4fr 2fr 8rem auto; gap: var(--gap-2); align-items: start;
+  margin-bottom: var(--gap-2);
+}
+.dept-succession > .btn { margin-top: var(--gap-2); }
+
 /* ---------- Small screens ---------- */
 
 @media (max-width: 600px) {
+  .succession-row { grid-template-columns: 1fr; }
   .toolbar { padding-bottom: var(--gap-6); }
   .lead { grid-template-columns: 72px minmax(0, 1fr); }
   .lead-office { font-size: var(--t-xl); }

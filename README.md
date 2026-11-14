@@ -48,6 +48,11 @@ form with the usual statements for that kind of item. It's previewed, along with
 items of the same name, before anything is created, and a source URL given there is cited on the
 new statements.
 
+A department's formation and dissolution can be recorded from its edit dialog: one row per
+department it came from (replaces, separated from) or went to (replaced by, merged into), with
+the part concerned and the date as qualifiers. These are only ever added to Wikidata, after a
+preview, and "replaces" / "replaced by" are added to the other department too.
+
 To see changes made on Wikidata sooner, log in and use "Refresh from Wikidata" in an office or
 department dialog, or add `?refresh=1` to the page address to refetch the whole country. Terms
 saved through this tool show straight away, marked as waiting, until Wikidata's query service

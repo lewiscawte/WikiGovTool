@@ -1,5 +1,5 @@
 import { api, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
-import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
+import { createItemLine, itemPicker, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
   <div class="dialog-backdrop" id="departmentDialogBackdrop">
@@ -50,6 +50,35 @@ document.body.insertAdjacentHTML('beforeend', `
           <div id="deptProfileBody"></div>
         </aside>
       </div>
+      <section class="dept-succession" id="deptSuccession" hidden>
+        <h3 class="dialog-section"><span>Formation and dissolution</span></h3>
+        <p class="create-item-hint">
+          Saved to Wikidata as you, after a preview, and only ever added. One row per department,
+          so a department formed from parts of several, or split several ways, gets a row each.
+          "Replaces" and "replaced by" are added to the other department too.
+        </p>
+        <h4 class="dept-succession-heading">Formed from</h4>
+        <div id="deptFormedRows"></div>
+        <button type="button" class="link-btn" id="deptAddFormed">+ Add a department it was formed from</button>
+        <h4 class="dept-succession-heading">On dissolution</h4>
+        <div id="deptDissolvedRows"></div>
+        <button type="button" class="link-btn" id="deptAddDissolved">+ Add a department it went to</button>
+        <div class="field create-item-source">
+          <label for="deptSuccessionSource">Source URL (recommended)</label>
+          <input class="input" id="deptSuccessionSource" placeholder="https://… a page that confirms the change">
+          <p class="create-item-hint">Cited on every statement added.</p>
+        </div>
+        <p class="status-line" id="deptSuccessionStatus"></p>
+        <button type="button" class="btn" id="deptSuccessionPreview">Preview Wikidata edit</button>
+        <section class="edit-review" id="deptSuccessionReview" hidden aria-labelledby="deptSuccessionReviewTitle">
+          <h3 class="edit-review-title" id="deptSuccessionReviewTitle">Review edit to Wikidata</h3>
+          <div id="deptSuccessionReviewBody"></div>
+          <div class="edit-review-actions">
+            <button type="button" class="btn" id="deptSuccessionReviewCancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="deptSuccessionPublish">Publish to Wikidata</button>
+          </div>
+        </section>
+      </section>
       <p class="status-line" id="departmentDialogStatus"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="departmentDialogRefresh">Refresh from Wikidata</button>
@@ -174,7 +203,9 @@ function renderProfile(message) {
   profileRow(dl, 'Country', itemLinks(profile.country));
   profileRow(dl, 'Headquarters', itemLinks(profile.headquarters));
   profileRow(dl, 'Replaces', itemLinks(profile.replaces));
+  profileRow(dl, 'Separated from', itemLinks(profile.separatedFrom ?? []));
   profileRow(dl, 'Replaced by', itemLinks(profile.replacedBy));
+  profileRow(dl, 'Merged into', itemLinks(profile.mergedInto ?? []));
   // Only http(s) becomes a link: the value is from Wikidata, and its URL type isn't the only
   // thing that should stand between a page anyone can edit and an href.
   const website = /^https?:\/\//i.test(profile.website || '') ? profile.website : null;
@@ -278,6 +309,7 @@ export function openAddDepartmentDialog({ onSave } = {}) {
   editQid = null;
   onSaveCallback = onSave || (() => {});
   titleEl.textContent = 'Add department';
+  resetSuccession(false);
   refreshBtn.hidden = true;
   createLine.hidden = true;
   addSection.style.display = 'block';
@@ -308,6 +340,7 @@ export function openEditDepartmentDialog(dept, { onSave } = {}) {
   dissolvedInput.value = dept.dissolved ? dept.dissolved.slice(0, 10) : '';
   // The QID is what the edit is keyed on, so it can't be changed here.
   qidInput.readOnly = true;
+  resetSuccession(QID_RE.test(qidInput.value));
   refreshBtn.hidden = !QID_RE.test(qidInput.value);
   refreshBtn.disabled = false;
   setStatus('');
@@ -368,5 +401,182 @@ saveBtn.addEventListener('click', async () => {
     setTimeout(close, 400);
   } catch (err) {
     setStatus(err.status === 401 ? 'Log in with Wikimedia first.' : `Error: ${err.message}`, true);
+  }
+});
+
+// ---------- Formation and dissolution: replaces / separated from / replaced by / merged into ----------
+
+const successionEl = document.getElementById('deptSuccession');
+const formedRows = document.getElementById('deptFormedRows');
+const dissolvedRows = document.getElementById('deptDissolvedRows');
+const successionSource = document.getElementById('deptSuccessionSource');
+const successionStatus = document.getElementById('deptSuccessionStatus');
+const successionReview = document.getElementById('deptSuccessionReview');
+const successionReviewBody = document.getElementById('deptSuccessionReviewBody');
+const successionPublish = document.getElementById('deptSuccessionPublish');
+// Row readers, so a removed row is simply dropped from the list.
+let formed = [];
+let dissolved = [];
+let pendingSuccession = null;
+
+const RELATIONS = {
+  formed: [['P1365', 'replaces (it ended)'], ['P807', 'separated from (it carried on)']],
+  dissolved: [['P1366', 'replaced by'], ['P7888', 'merged into (it already existed)']],
+};
+
+function setSuccessionStatus(text, isError = false) {
+  successionStatus.textContent = text;
+  successionStatus.className = isError ? 'status-line error' : 'status-line';
+}
+
+function hideSuccessionReview() {
+  successionReview.hidden = true;
+  successionReviewBody.innerHTML = '';
+  pendingSuccession = null;
+}
+
+function resetSuccession(show) {
+  successionEl.hidden = !show;
+  formedRows.innerHTML = '';
+  dissolvedRows.innerHTML = '';
+  formed = [];
+  dissolved = [];
+  successionSource.value = '';
+  setSuccessionStatus('');
+  hideSuccessionReview();
+}
+
+// One department it came from or went to: which one, how, which part, and when. The date
+// starts as the department's own inception or dissolution date.
+function successionRow(kind) {
+  const list = kind === 'formed' ? formed : dissolved;
+  const row = document.createElement('div');
+  row.className = 'succession-row';
+  const dept = itemPicker('Search for the department', 'department');
+  const relation = document.createElement('select');
+  relation.className = 'input';
+  relation.setAttribute('aria-label', 'How');
+  for (const [value, text] of RELATIONS[kind]) relation.appendChild(Object.assign(document.createElement('option'), { value, textContent: text }));
+  const part = itemPicker('Which part (optional)', 'part');
+  const date = document.createElement('input');
+  date.className = 'input';
+  date.placeholder = 'YYYY-MM-DD';
+  date.setAttribute('aria-label', 'Date');
+  date.value = (kind === 'formed' ? inceptionInput : dissolvedInput).value.trim();
+  dept.input.setAttribute('aria-label', 'Department');
+  part.input.setAttribute('aria-label', 'Which part (applies to part)');
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn';
+  remove.textContent = 'Remove';
+  const reader = () => {
+    const qid = dept.value();
+    if (!qid) return null;
+    return { relation: relation.value, qid, partQid: part.value(), date: date.value.trim() };
+  };
+  remove.addEventListener('click', () => {
+    list.splice(list.indexOf(reader), 1);
+    row.remove();
+    hideSuccessionReview();
+  });
+  row.append(dept.element, relation, part.element, date, remove);
+  list.push(reader);
+  (kind === 'formed' ? formedRows : dissolvedRows).appendChild(row);
+  dept.input.focus();
+}
+
+document.getElementById('deptAddFormed').addEventListener('click', () => successionRow('formed'));
+document.getElementById('deptAddDissolved').addEventListener('click', () => successionRow('dissolved'));
+document.getElementById('deptSuccessionReviewCancel').addEventListener('click', hideSuccessionReview);
+
+function successionRequest() {
+  return {
+    departmentQid: editQid,
+    formedFrom: formed.map((read) => read()).filter(Boolean),
+    dissolvedInto: dissolved.map((read) => read()).filter(Boolean),
+    sourceUrl: successionSource.value.trim(),
+  };
+}
+
+function renderSuccessionReview({ plan, labels, propertyLabels, username, tags }, request) {
+  successionReviewBody.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.textContent = `As ${username}:`;
+  successionReviewBody.appendChild(intro);
+  const named = (qid) => `${labels[qid] ?? qid} (${qid})`;
+  plan.sides.forEach((side) => {
+    const heading = document.createElement('p');
+    heading.append('On ', link(wikidataUrl(side.entityQid), `${side.entityLabel} (${side.entityQid})`), ':');
+    const list = document.createElement('ul');
+    list.className = 'edit-review-changes';
+    side.statements.forEach((st) => {
+      const li = document.createElement('li');
+      li.append(st.existing ? 'Already on Wikidata, not added: ' : 'Add ');
+      li.append(`${propertyLabels[st.property]} (${st.property}): `);
+      const value = document.createElement(st.existing ? 'span' : 'ins');
+      value.textContent = named(st.valueQid);
+      li.appendChild(value);
+      if (st.partQid) li.append(`; applies to part: ${named(st.partQid)}`);
+      if (st.dateText && !st.existing) li.append(`; point in time: ${st.dateText}`);
+      if (plan.sourceUrl && !st.existing) li.append(' — cited to the source URL');
+      list.appendChild(li);
+    });
+    successionReviewBody.append(heading, list);
+  });
+  const nothing = !plan.sides.some((s) => s.statements.some((st) => !st.existing));
+  const note = document.createElement('p');
+  note.className = 'edit-review-note';
+  note.textContent = (nothing ? 'Wikidata already has all of these. Nothing to add. ' : '')
+    + (plan.sourceUrl ? '' : 'No source URL: the statements will be unsourced. ')
+    + (tags ? `Tagged: ${tags}.` : 'No edit tag is configured.');
+  successionReviewBody.appendChild(note);
+  pendingSuccession = nothing ? null : {
+    ...request,
+    baseRevIds: Object.fromEntries(plan.sides.map((s) => [s.entityQid, s.baseRevId])),
+  };
+  successionPublish.hidden = nothing;
+  successionPublish.disabled = false;
+  successionReview.hidden = false;
+}
+
+document.getElementById('deptSuccessionPreview').addEventListener('click', async () => {
+  let request;
+  try {
+    request = successionRequest();
+  } catch (err) {
+    setSuccessionStatus(err.message, true);
+    return;
+  }
+  if (!request.formedFrom.length && !request.dissolvedInto.length) {
+    setSuccessionStatus('Add a department it was formed from or went to first.', true);
+    return;
+  }
+  setSuccessionStatus('Checking Wikidata…');
+  try {
+    const preview = await api('/api/wikidata/succession/preview', { method: 'POST', body: JSON.stringify(request) });
+    setSuccessionStatus('');
+    renderSuccessionReview(preview, request);
+  } catch (err) {
+    setSuccessionStatus(err.status === 401 ? 'Log in with Wikimedia first.' : err.message, true);
+  }
+});
+
+successionPublish.addEventListener('click', async () => {
+  if (!pendingSuccession) return;
+  successionPublish.disabled = true;
+  setSuccessionStatus('Publishing to Wikidata…');
+  try {
+    const { applied } = await api('/api/wikidata/succession/save', { method: 'POST', body: JSON.stringify(pendingSuccession) });
+    resetSuccession(true);
+    successionStatus.textContent = 'Saved to Wikidata. ';
+    applied.forEach(({ entityQid, baseRevId, revid }) => {
+      const diff = link(`https://www.wikidata.org/w/index.php?title=${entityQid}&diff=${revid}&oldid=${baseRevId}`, `View the edit to ${entityQid}`);
+      successionStatus.append(diff, '. ');
+    });
+    successionStatus.append("The panel above updates once Wikidata's query service catches up, in a few minutes.");
+  } catch (err) {
+    successionPublish.disabled = false;
+    const partial = err.body?.revisions?.length ? ` ${err.body.revisions.length} edit(s) went through before this; check the items' history.` : '';
+    setSuccessionStatus((err.status === 401 ? 'Log in with Wikimedia first.' : err.message) + partial, true);
   }
 });

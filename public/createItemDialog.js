@@ -72,8 +72,10 @@ function field(labelText, control, { wide = false } = {}) {
   wrap.className = wide ? 'field create-item-wide' : 'field';
   const label = document.createElement('label');
   label.textContent = labelText;
-  control.id = `ci-${Math.random().toString(36).slice(2, 8)}`;
-  label.htmlFor = control.id;
+  // The label belongs to the input itself, also when it's wrapped (as in an item picker).
+  const target = control.matches('input, select') ? control : control.querySelector('input') ?? control;
+  target.id = `ci-${Math.random().toString(36).slice(2, 8)}`;
+  label.htmlFor = target.id;
   wrap.append(label, control);
   return wrap;
 }
@@ -113,9 +115,10 @@ function checkbox(key, labelText, checked = true) {
   return label;
 }
 
-// A Wikidata item chosen by searching, or by typing its Q-number.
-function itemInput(key, labelText, placeholder) {
-  const wrap = document.createElement('div');
+// A Wikidata item chosen by searching, or by typing its Q-number. value() is the chosen Q-number,
+// null when empty, and throws when text was typed but nothing picked.
+export function itemPicker(placeholder, what = 'item') {
+  const element = document.createElement('div');
   const input = document.createElement('input');
   input.className = 'input';
   input.placeholder = placeholder;
@@ -155,13 +158,22 @@ function itemInput(key, labelText, placeholder) {
       }
     }, 250);
   });
-  readers[key] = () => {
-    if (!input.value.trim()) return null;
-    if (!chosen) throw new Error(`Pick a ${labelText.toLowerCase()} from the list, or enter its Q-number.`);
-    return chosen;
+  element.append(input, results);
+  return {
+    element,
+    input,
+    value() {
+      if (!input.value.trim()) return null;
+      if (!chosen) throw new Error(`Pick a ${what} from the list, or enter its Q-number.`);
+      return chosen;
+    },
   };
-  wrap.append(input, results);
-  return field(labelText, wrap, { wide: true });
+}
+
+function itemInput(key, labelText, placeholder) {
+  const picker = itemPicker(placeholder, labelText.toLowerCase());
+  readers[key] = () => picker.value();
+  return field(labelText, picker.element, { wide: true });
 }
 
 function grid(...children) {

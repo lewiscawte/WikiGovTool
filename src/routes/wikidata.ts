@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import {
-  fetchEntityForEdit, getEntity, invalidateNewItem, invalidateOfficeholderHistory, purgeCountryLists, searchEntities,
+  fetchEntityForEdit, getEntity, invalidateItem, invalidateOfficeholderHistory, purgeCountryLists, searchEntities,
 } from '../services/wikidataClient';
 import {
   createItem, fetchLabels, findPossibleDuplicates, parseNewItem, plannedStatements, PROPERTY_LABELS, referencedItems,
 } from '../services/wikidataCreate';
+import {
+  applySuccession, parseSuccession, planSuccession, SUCCESSION_LABELS, SuccessionPlan, successionHasWork, successionItems,
+} from '../services/wikidataSuccession';
 import {
   applyTermPlan, EditInputError, parseDateInput, planHasWork, planTermEdit, TermPlan, TermProperty, WikidataApiError,
   WikipediaSource,
@@ -198,11 +201,58 @@ wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
     // So the country's office list is fetched again, and finds the office once Wikidata's
     // query service has it.
     if (item.kind === 'office') await purgeCountryLists(item.countryQid, null);
-    if (item.kind !== 'person') await invalidateNewItem(item.kind, created.qid);
+    if (item.kind !== 'person') await invalidateItem(item.kind, created.qid);
     res.status(201).json({ ...created, label: item.label, officeholder });
   } catch (err) {
     if (err instanceof EditInputError) res.status(400).json({ error: err.message });
     else if (err instanceof WikidataApiError) res.status(502).json({ error: `Wikidata refused the new item (${err.code}): ${err.message}` });
     else next(err);
+  }
+});
+
+// A department's formation and dissolution: { departmentQid, formedFrom, dissolvedInto,
+// sourceUrl? } (see parseSuccession). Statements are only added, never changed or removed.
+async function successionFromBody(body: any): Promise<SuccessionPlan> {
+  const input = parseSuccession(body);
+  const qids = [...new Set([input.departmentQid, ...input.links.map((l) => l.qid)])];
+  const entities = await Promise.all(qids.map((q) => fetchEntityForEdit(q)));
+  return planSuccession(input, new Map(qids.map((q, i) => [q, entities[i]] as const).filter(([, e]) => e)));
+}
+
+wikidataRouter.post('/succession/preview', requireAuth, async (req, res, next) => {
+  try {
+    const plan = await successionFromBody(req.body);
+    res.json({
+      plan,
+      labels: await fetchLabels(successionItems(plan)),
+      propertyLabels: SUCCESSION_LABELS,
+      username: req.session.user?.username,
+      tags: config.wikidataEditTags || null,
+    });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else next(err);
+  }
+});
+
+wikidataRouter.post('/succession/save', requireAuth, async (req, res, next) => {
+  try {
+    // Re-planned from the live items, and refused if any changed since the preview.
+    const plan = await successionFromBody(req.body);
+    const previewed = req.body?.baseRevIds ?? {};
+    const changed = plan.sides.filter((s) => Number(previewed[s.entityQid]) !== s.baseRevId).map((s) => s.entityQid);
+    if (changed.length) {
+      res.status(409).json({ error: `${changed.join(', ')} changed on Wikidata since the preview. Review the edit again.` });
+      return;
+    }
+    if (!successionHasWork(plan)) throw new EditInputError('Nothing to add: Wikidata already has these');
+    const applied = await applySuccession(req, plan);
+    await Promise.all(plan.sides.map((s) => invalidateItem('department', s.entityQid)));
+    res.json({ applied });
+  } catch (err) {
+    if (err instanceof EditInputError) res.status(400).json({ error: err.message });
+    else if (err instanceof WikidataApiError) {
+      res.status(502).json({ error: `Wikidata refused the edit to ${err.entityQid} (${err.code}): ${err.message}`, revisions: err.completedRevisions });
+    } else next(err);
   }
 });
