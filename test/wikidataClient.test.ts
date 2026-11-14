@@ -87,7 +87,11 @@ const COUNTRY_OFFICES: Record<string, string[]> = {
   Q5000: ['Q999', 'Q902', 'Q901', 'Q900'],
   // A head of state listed after more ministers than the cap allows.
   Q5001: [...Array.from({ length: 450 }, (_, i) => `Q${2000 + i}`), 'Q1100'],
+  // Q3000 was created after the class lists were fetched, as a subclass of minister.
+  Q5002: ['Q900', 'Q3000'],
 };
+// Each office's P279 parents; offices not listed have an unrelated one.
+const PARENTS: Record<string, string[]> = { Q3000: ['Q83307'] };
 
 function stubCabinetSparql() {
   return mock.method(globalThis, 'fetch', async (url: string) => {
@@ -95,7 +99,9 @@ function stubCabinetSparql() {
     const closure = query.match(/wdt:P279\* wd:(Q\d+)/);
     if (closure) return sparqlBody(SUBCLASSES[closure[1]].map((q) => ({ sub: entity(q) })));
     const country = query.match(/wdt:P1001 wd:(Q\d+)/);
-    if (country) return sparqlBody(COUNTRY_OFFICES[country[1]].map((q) => ({ position: entity(q) })));
+    if (country) {
+      return sparqlBody(COUNTRY_OFFICES[country[1]].flatMap((q) => (PARENTS[q] ?? ['Q1']).map((parent) => ({ position: entity(q), parent: entity(parent) }))));
+    }
     return sparqlBody(requestedQids({ arguments: [url] }).map((q) => ({
       position: entity(q),
       positionLabel: { value: `Office ${q}` },
@@ -125,6 +131,12 @@ test('cabinet positions keep heads of state over ministers when capped at 400, w
   assert.equal(positions.length, 400);
   assert.deepEqual(positions[0], { qid: 'Q1100', label: 'Office Q1100', bucket: 'Head of State', department: null });
   assert.equal(fetchMock.mock.calls.filter(isClosureQuery).length, before);
+});
+
+test('an office newer than the cached class lists is found through its parent class', async () => {
+  stubCabinetSparql();
+  const positions = await fetchCabinetPositions('Q5002');
+  assert.deepEqual(positions.map((p) => [p.qid, p.bucket]), [['Q900', 'Head of State'], ['Q3000', 'Minister']]);
 });
 
 test('lifespans are returned as a new map each call', async () => {

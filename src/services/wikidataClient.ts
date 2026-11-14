@@ -79,6 +79,12 @@ export async function invalidateItem(kind: 'office' | 'department', qid: string)
   await Promise.all(caches.map((c) => c.invalidate(qid)));
 }
 
+// A country's office list after an office was created for it: refetched, but kept only briefly
+// until the query service has the new office (see ReadThroughCache.invalidate).
+export async function invalidateCountryOffices(countryQid: string): Promise<void> {
+  if (QID_RE.test(countryQid)) await cabinetPositionsCache.invalidate(countryQid);
+}
+
 // A country's office list, and the list of a department class's members, if it has one.
 export async function purgeCountryLists(countryQid: string, departmentClassQid: string | null): Promise<void> {
   await Promise.all([
@@ -268,13 +274,21 @@ export async function fetchCabinetPositions(countryQid: string): Promise<Cabinet
 async function queryCabinetPositions(countryQid: string): Promise<CabinetPosition[]> {
   const [subclassSets, candidates] = await Promise.all([
     Promise.all(BUCKET_CLASSES.map(async (c) => new Set(await fetchSubclasses(c.qid)))),
-    runSparql(`SELECT DISTINCT ?position WHERE { ?position wdt:P1001 wd:${countryQid} ; wdt:P279 [] . }`),
+    runSparql(`SELECT DISTINCT ?position ?parent WHERE { ?position wdt:P1001 wd:${countryQid} ; wdt:P279 ?parent . }`),
   ]);
 
-  const matched: Array<{ qid: string; rank: number }> = [];
+  // An office is in a class's tree if it or one of its direct parents (P279) is in the cached
+  // list. The parents matter for an office created since that list was fetched: it isn't in
+  // the list yet, but its parent ("minister", say) long has been.
+  const related = new Map<string, Set<string>>();
   for (const b of candidates) {
     const qid = toQid(b.position.value);
-    const rank = subclassSets.findIndex((set) => set.has(qid));
+    if (!related.has(qid)) related.set(qid, new Set([qid]));
+    if (b.parent?.type === 'uri') related.get(qid)!.add(toQid(b.parent.value));
+  }
+  const matched: Array<{ qid: string; rank: number }> = [];
+  for (const [qid, ids] of related) {
+    const rank = subclassSets.findIndex((set) => [...ids].some((id) => set.has(id)));
     if (rank !== -1) matched.push({ qid, rank });
   }
 

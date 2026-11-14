@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  fetchEntityForEdit, getEntity, invalidateItem, invalidateOfficeholderHistory, purgeCountryLists, searchEntities,
+  fetchEntityForEdit, getEntity, invalidateCountryOffices, invalidateItem, invalidateOfficeholderHistory, searchEntities,
 } from '../services/wikidataClient';
 import {
   createItem, fetchLabels, findPossibleDuplicates, parseNewItem, plannedStatements, PROPERTY_LABELS, referencedItems,
@@ -250,9 +250,9 @@ wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
         officeholder = { error: (err as Error).message };
       }
     }
-    // So the country's office list is fetched again, and finds the office once Wikidata's
-    // query service has it.
-    if (item.kind === 'office') await purgeCountryLists(item.countryQid, null);
+    // So the country's office list is fetched again, and only kept briefly until Wikidata's
+    // query service has the office; a refetch in the meantime would leave it out.
+    if (item.kind === 'office') await invalidateCountryOffices(item.countryQid);
     if (item.kind !== 'person') await invalidateItem(item.kind, created.qid);
     res.status(201).json({ ...created, label: item.label, officeholder });
   } catch (err) {
