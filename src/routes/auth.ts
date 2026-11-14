@@ -31,7 +31,11 @@ export function safeReturnTo(raw: unknown): string {
   try {
     const url = new URL(raw, 'http://localhost');
     if (url.origin !== 'http://localhost') return '/';
-    return `${url.pathname}${url.search}${url.hash}`;
+    // Checked again after parsing: dot segments can turn "/.//evil.example" into "//evil.example",
+    // which a browser reads as another site.
+    const out = `${url.pathname}${url.search}${url.hash}`;
+    if (!out.startsWith('/') || out.startsWith('//') || out.includes('\\')) return '/';
+    return out;
   } catch {
     return '/';
   }
