@@ -11,6 +11,7 @@ import {
   applyDepartmentEdit, DepartmentEditPlan, departmentEditHasWork, parseDepartmentEdit, planDepartmentEdit,
 } from '../services/wikidataDepartmentEdit';
 import { setPublishedDepartment } from '../store/departmentStore';
+import { editEvents, recordStats } from '../services/stats';
 import {
   applyTermPlan, EditInputError, parseDateInput, planHasWork, planTermEdit, TermPlan, TermProperty, WikidataApiError,
   WikipediaSource,
@@ -179,6 +180,11 @@ wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
     if (!termWork && officeDates.length === 0) throw new EditInputError('Nothing to change: Wikidata already has these dates');
 
     const applied: { entityQid: string; baseRevId: number; revisions: number[] }[] = termWork ? await applyTermPlan(req, plan!) : [];
+    const username = req.session.user?.username ?? 'unknown';
+    const country = typeof req.body?.countryQid === 'string' ? req.body.countryQid : null;
+    void recordStats(editEvents(username, country, applied.map((a) => ({
+      entityQid: a.entityQid, revisions: [...a.revisions], type: req.body?.newTerm === true ? 'term-new-holder' : 'term',
+    }))));
     if (plan && termWork) {
       recordSavedTerm(plan, person);
       await invalidateOfficeholderHistory(office.id);
@@ -196,6 +202,7 @@ wikidataRouter.post('/term/save', requireAuth, async (req, res, next) => {
       }
       if (officeEdits) officeEdits.revisions.push(revid);
       else applied.push({ entityQid: office.id, baseRevId: office.lastrevid, revisions: [revid] });
+      void recordStats(editEvents(username, country, [{ entityQid: office.id, revisions: [revid], type: 'office-dates' }]));
       const saved = (field: DateProperty) => officeDates.find((c) => c.field === field)?.to;
       recordOfficeDates(office.id, {
         ...(saved('P571') ? { inception: saved('P571') } : {}),
@@ -236,6 +243,8 @@ wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
   try {
     const item = parseNewItem(req.body);
     const created = await createItem(req, item);
+    const username = req.session.user?.username ?? 'unknown';
+    void recordStats([{ username, kind: 'create', type: item.kind, entity: created.qid, revid: created.revid, country: item.countryQid }]);
     // A new person given the office they hold: the office lists them too (officeholder,
     // P1308), as a term saved through the office dialog would. The item exists by now either
     // way, so a failure here is reported alongside it rather than as a failed create.
@@ -246,6 +255,7 @@ wikidataRouter.post('/item/create', requireAuth, async (req, res, next) => {
         if (!person || !office) throw new Error('the new item or the office could not be read back from Wikidata');
         const plan = planTermEdit(person, office, item.heldStart ?? null, item.heldEnd ?? null);
         const applied = planHasWork(plan) ? await applyTermPlan(req, plan) : [];
+        void recordStats(editEvents(username, item.countryQid, applied.map((a) => ({ ...a, type: 'term-new-holder' as const }))));
         recordSavedTerm(plan, person);
         await invalidateOfficeholderHistory(item.heldPositionQid);
         officeholder = { revisions: applied.flatMap((a) => a.revisions) };
@@ -304,6 +314,14 @@ wikidataRouter.post('/department/save', requireAuth, async (req, res, next) => {
     }
     if (!departmentEditHasWork(plan)) throw new EditInputError('Nothing to change: Wikidata already has all of this');
     const applied = await applyDepartmentEdit(req, plan, entities);
+    // The department's own edit counts as a fields edit if it changed any of its fields; the
+    // edits to the departments it links to are formation/dissolution links.
+    void recordStats(editEvents(req.session.user?.username ?? 'unknown', typeof req.body?.countryQid === 'string' ? req.body.countryQid : null,
+      applied.map((a) => ({
+        entityQid: a.entityQid,
+        revisions: [a.revid],
+        type: a.entityQid === plan.departmentQid && plan.fields.length ? 'department-fields' : 'department-succession',
+      }))));
     // The page reads departments through the query service, which is minutes behind: show the
     // published values meanwhile.
     const value = (field: string) => plan.fields.find((f) => f.field === field)?.to;

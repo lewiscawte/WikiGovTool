@@ -537,6 +537,16 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
 .other-holders li { color: var(--ink); }
 .other-holders-heading { font-weight: 600; }
 
+/* Usage statistics page. */
+.stats { max-width: 960px; margin: 0 auto; padding: var(--gap-6) var(--gap-4); }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--gap-6); }
+.stats-table { width: 100%; border-collapse: collapse; font: var(--t-sm) var(--sans); margin-top: var(--gap-3); }
+.stats-table caption { text-align: left; font-weight: 600; margin-bottom: var(--gap-2); }
+.stats-table th, .stats-table td { padding: var(--gap-1) var(--gap-2); border-bottom: 1px solid var(--rule-soft); text-align: left; }
+.stats-table th:not(:first-child), .stats-table td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.stats-table th { color: var(--ink-muted); font-weight: 500; }
+.stats-note { margin-top: var(--gap-8); font-size: var(--t-xs); color: var(--ink-muted); max-width: 60ch; }
+
 /* ---------- Small screens ---------- */
 
 @media (max-width: 600px) {
@@ -572,3 +582,4 @@ input[type="date"].headline-control::-webkit-calendar-picker-indicator { opacity
   font-size: var(--t-xs); color: var(--ink-muted);
 }
 .site-footer a { color: inherit; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.site-footer a.footer-link { font-family: inherit; }

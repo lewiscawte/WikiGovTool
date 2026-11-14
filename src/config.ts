@@ -19,6 +19,17 @@ export const config = {
   // Both are needed to use Redis; without them everything is cached in memory only.
   redisUrl: process.env.REDIS_URL || '',
   redisKeyPrefix: process.env.REDIS_KEY_PREFIX || '',
+  // Usage statistics, kept in a MySQL/MariaDB database (ToolsDB on Toolforge). Off unless
+  // STATS_DB_NAME is set. User and password default to the [client] section of
+  // STATS_DB_CNF (Toolforge's ~/replica.my.cnf).
+  stats: {
+    dbHost: process.env.STATS_DB_HOST || 'tools.db.svc.wikimedia.cloud',
+    dbPort: Number(process.env.STATS_DB_PORT) || 3306,
+    dbName: process.env.STATS_DB_NAME || '',
+    dbUser: process.env.STATS_DB_USER || '',
+    dbPassword: process.env.STATS_DB_PASSWORD || '',
+    dbCnf: process.env.STATS_DB_CNF || `${process.env.HOME ?? ''}/replica.my.cnf`,
+  },
   oauth: {
     clientId: process.env.OAUTH_CLIENT_ID || '',
     clientSecret: process.env.OAUTH_CLIENT_SECRET || '',

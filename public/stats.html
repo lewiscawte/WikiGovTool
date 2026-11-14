@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabinet Explorer: Usage statistics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libertinus+Serif:ital,wght@0,400;0,600;1,400&family=Public+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="toolbar">
+    <span class="brand">Cabinet Explorer</span>
+    <nav class="views" aria-label="View">
+      <a href="departments.html">Departments</a>
+      <a href="index.html">Offices</a>
+    </nav>
+  </div>
+  <h1 class="headline">Usage statistics</h1>
+  <p class="cabinet" id="statsSince"></p>
+</header>
+
+<main class="stats">
+  <p class="status-line" id="statsStatus">Loading…</p>
+
+  <section class="departments-section" hidden id="statsTotals">
+    <h2>New items and edits by type</h2>
+    <div class="stats-grid">
+      <table class="stats-table">
+        <caption>New Wikidata items</caption>
+        <thead><tr><th scope="col">Type</th><th scope="col">Items</th></tr></thead>
+        <tbody id="statsCreated"></tbody>
+      </table>
+      <table class="stats-table">
+        <caption>Edits to Wikidata</caption>
+        <thead><tr><th scope="col">Type</th><th scope="col">Edits</th></tr></thead>
+        <tbody id="statsEdits"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="departments-section" hidden id="statsUsersSection">
+    <h2>By user</h2>
+    <table class="stats-table">
+      <thead><tr><th scope="col">User</th><th scope="col">New items</th><th scope="col">Edits</th></tr></thead>
+      <tbody id="statsUsers"></tbody>
+    </table>
+  </section>
+
+  <section class="departments-section" hidden id="statsMonthsSection">
+    <h2>By month</h2>
+    <table class="stats-table">
+      <thead><tr><th scope="col">Month</th><th scope="col">New items</th><th scope="col">Edits</th></tr></thead>
+      <tbody id="statsMonths"></tbody>
+    </table>
+  </section>
+
+  <p class="stats-note">
+    Counts one per Wikidata revision made through this tool. Every edit counted is public on
+    Wikidata; the tool keeps only the user name, the item, the revision and when it was made.
+  </p>
+</main>
+
+<footer class="site-footer">
+  WikiGovTool
+</footer>
+
+<script type="module" src="stats.js"></script>
+</body>
+</html>
