@@ -1,9 +1,8 @@
-import { api, dateForWikidata, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
+import { api, dateForWikidata, lightDismissFallback, refreshFromWikidata, renderSourceLinks, state } from './shared.js';
 import { createItemLine, itemPicker, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
-  <div class="dialog-backdrop" id="departmentDialogBackdrop">
-    <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="departmentDialogTitle">
+  <dialog class="dialog dialog-wide" id="departmentDialog" closedby="any" aria-labelledby="departmentDialogTitle">
       <div class="dialog-heading">
         <h2 class="dialog-title" id="departmentDialogTitle">Department</h2>
         <span class="source-links" id="deptSourceLinks"></span>
@@ -83,11 +82,10 @@ document.body.insertAdjacentHTML('beforeend', `
         <button type="button" class="btn" id="departmentDialogCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="departmentDialogSave">Save</button>
       </div>
-    </div>
-  </div>
+  </dialog>
 `);
 
-const backdrop = document.getElementById('departmentDialogBackdrop');
+const dialog = document.getElementById('departmentDialog');
 const titleEl = document.getElementById('departmentDialogTitle');
 const addSection = document.getElementById('deptAddSection');
 const searchInput = document.getElementById('deptSearch');
@@ -248,18 +246,15 @@ function setStatus(text, isError = false) {
 }
 
 function close() {
-  backdrop.classList.remove('open');
+  dialog.close();
   setStatus('');
   resultsSelect.innerHTML = '';
   searchInput.value = '';
 }
 
 cancelBtn.addEventListener('click', close);
-backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (backdrop.classList.contains('open')) close();
-});
+dialog.addEventListener('close', () => dialog.open || close());
+lightDismissFallback(dialog);
 
 let searchTimeout = null;
 searchInput.addEventListener('input', () => {
@@ -322,7 +317,7 @@ export function openAddDepartmentDialog({ onSave } = {}) {
   searchInput.value = '';
   qidInput.readOnly = false;
   loadProfile('');
-  backdrop.classList.add('open');
+  dialog.showModal();
   searchInput.focus();
 }
 
@@ -345,7 +340,7 @@ export function openEditDepartmentDialog(dept, { onSave } = {}) {
   refreshBtn.disabled = false;
   setStatus('');
   loadProfile(qidInput.value);
-  backdrop.classList.add('open');
+  dialog.showModal();
   labelInput.focus();
 }
 

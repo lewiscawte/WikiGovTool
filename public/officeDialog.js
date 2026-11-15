@@ -1,14 +1,13 @@
 // The office comparison dialog (Wikidata vs Wikipedia) and the add-office dialog, shared by
 // both pages. Importing this module adds the dialogs' markup to the page.
 import {
-  api, dateForWikidata, MONTHS, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state,
+  api, dateForWikidata, lightDismissFallback, MONTHS, officeTitle, QID_ONLY_RE, refreshFromWikidata, renderSourceLinks, state,
 } from './shared.js';
 import { openAddOfficeholderDialog } from './officeholderDialog.js';
 import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
-  <div class="dialog-backdrop" id="addOfficeBackdrop">
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="addOfficeTitle">
+  <dialog class="dialog" id="addOfficeDialog" closedby="any" aria-labelledby="addOfficeTitle">
       <h2 class="dialog-title" id="addOfficeTitle">Add office</h2>
       <p class="dialog-intro">
         Adds an office the page doesn't list. Search Wikidata to link its item, or create one;
@@ -28,11 +27,9 @@ document.body.insertAdjacentHTML('beforeend', `
         <button type="button" class="btn" id="addOfficeCancelBtn">Cancel</button>
         <button type="button" class="btn btn-primary" id="addOfficeSubmitBtn">Add office</button>
       </div>
-    </div>
-  </div>
+  </dialog>
 
-  <div class="dialog-backdrop" id="backdrop">
-    <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+  <dialog class="dialog dialog-wide" id="officeDialog" closedby="any" aria-labelledby="dialogTitle">
       <h2 class="dialog-title" id="dialogTitle">Office</h2>
 
       <h3 class="dialog-section"><span>Office</span><span class="source-links" id="officeSourceLinks"></span></h3>
@@ -119,14 +116,13 @@ document.body.insertAdjacentHTML('beforeend', `
         <button type="button" class="btn" id="cancelBtn">Close</button>
         <button type="button" class="btn btn-primary" id="saveBtn">Save to Wikidata</button>
       </div>
-    </div>
-  </div>
+  </dialog>
 `);
 
-const backdrop = document.getElementById('backdrop');
+const dialog = document.getElementById('officeDialog');
 const linkBtn = document.getElementById('linkBtn');
 const refreshOfficeBtn = document.getElementById('refreshOfficeBtn');
-const addOfficeBackdrop = document.getElementById('addOfficeBackdrop');
+const addOfficeDialog = document.getElementById('addOfficeDialog');
 const addOfficeStatus = document.getElementById('addOfficeStatus');
 const newOfficeTitle = document.getElementById('new-office-title');
 const newOfficeDept = document.getElementById('new-office-dept');
@@ -290,7 +286,7 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
     compareCells[key].btn.disabled = true;
   }
 
-  backdrop.classList.add('open');
+  dialog.showModal();
   await refreshInfobox();
 
   // Heading icons: Wikidata straight away; Wikipedia once the real sitelink is known. An
@@ -320,7 +316,7 @@ export async function openOfficeDialog(entry, { onChange } = {}) {
 }
 
 function closeDialog() {
-  backdrop.classList.remove('open');
+  dialog.close();
   currentPositionId = null;
   currentEntry = null;
 }
@@ -357,12 +353,8 @@ document.getElementById('addHolderBtn').addEventListener('click', () => {
   closeDialog();
   openAddOfficeholderDialog(entry, { onSave, start: start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : '' });
 });
-backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeDialog(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (addOfficeBackdrop.classList.contains('open')) closeAddOfficeDialog();
-  else if (backdrop.classList.contains('open')) closeDialog();
-});
+dialog.addEventListener('close', () => dialog.open || closeDialog());
+lightDismissFallback(dialog);
 
 export function openAddOfficeDialog({ onChange } = {}) {
   onDataChanged = onChange || (() => {});
@@ -375,16 +367,16 @@ export function openAddOfficeDialog({ onChange } = {}) {
   newOfficeCreateLine.hidden = true;
   newOfficeQid = null;
   setStatus(addOfficeStatus, '');
-  addOfficeBackdrop.classList.add('open');
+  addOfficeDialog.showModal();
   newOfficeSearch.focus();
 }
 
 function closeAddOfficeDialog() {
-  addOfficeBackdrop.classList.remove('open');
+  addOfficeDialog.close();
 }
 
 document.getElementById('addOfficeCancelBtn').addEventListener('click', closeAddOfficeDialog);
-addOfficeBackdrop.addEventListener('click', (e) => { if (e.target === addOfficeBackdrop) closeAddOfficeDialog(); });
+lightDismissFallback(addOfficeDialog);
 
 document.getElementById('addOfficeSubmitBtn').addEventListener('click', async () => {
   const title = newOfficeTitle.value.trim();

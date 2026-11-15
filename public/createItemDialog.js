@@ -2,11 +2,10 @@
 // can't find. Each kind gets a few sensible statements, prefilled where the country or the
 // search already says what they should be. The server builds the item from these fields;
 // nothing is sent until the user has previewed it. Importing this module adds the dialog.
-import { api, dateForWikidata, state } from './shared.js';
+import { api, dateForWikidata, lightDismissFallback, state } from './shared.js';
 
 document.body.insertAdjacentHTML('beforeend', `
-  <div class="dialog-backdrop dialog-backdrop-top" id="createItemBackdrop">
-    <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="createItemTitle">
+  <dialog class="dialog dialog-wide" id="createItemDialog" closedby="any" aria-labelledby="createItemTitle">
       <h2 class="dialog-title" id="createItemTitle">Create a Wikidata item</h2>
       <p class="dialog-intro" id="createItemIntro"></p>
       <div id="createItemFields"></div>
@@ -30,11 +29,10 @@ document.body.insertAdjacentHTML('beforeend', `
         <button type="button" class="btn" id="createItemCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="createItemPreview">Preview</button>
       </div>
-    </div>
-  </div>
+  </dialog>
 `);
 
-const backdrop = document.getElementById('createItemBackdrop');
+const dialog = document.getElementById('createItemDialog');
 const titleEl = document.getElementById('createItemTitle');
 const introEl = document.getElementById('createItemIntro');
 const fieldsEl = document.getElementById('createItemFields');
@@ -291,12 +289,12 @@ export function openCreateItemDialog(newKind, newOptions = {}) {
   if (kind === 'person') renderPersonFields();
   else if (kind === 'office') renderOfficeFields();
   else renderDepartmentFields();
-  backdrop.classList.add('open');
+  dialog.showModal();
   fieldsEl.querySelector('input')?.focus();
 }
 
 function close() {
-  backdrop.classList.remove('open');
+  dialog.close();
   pending = null;
 }
 
@@ -408,13 +406,8 @@ document.getElementById('createItemReviewCancel').addEventListener('click', () =
   pending = null;
 });
 document.getElementById('createItemCancel').addEventListener('click', close);
-backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-// Opened over another dialog: Escape closes only this one.
-window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !backdrop.classList.contains('open')) return;
-  e.stopPropagation();
-  close();
-}, true);
+dialog.addEventListener('close', () => dialog.open || close());
+lightDismissFallback(dialog);
 
 // The "Can't find it? Create a new Wikidata item" line under a search.
 export function createItemLine(text, onClick) {

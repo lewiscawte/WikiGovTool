@@ -28,6 +28,20 @@ export const state = {
   countryQid: US_QID,
 };
 
+// Click-outside-to-close for a <dialog closedby="any"> where the browser lacks closedby
+// (Safari). Tests the pointer position, not the target: the dialog is also the target for
+// its own padding. Press and release must both be outside, so a drag-select doesn't close it.
+export function lightDismissFallback(dialog) {
+  if ('closedBy' in HTMLDialogElement.prototype) return;
+  const outside = (e) => {
+    const r = dialog.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  let pressedOutside = false;
+  dialog.addEventListener('pointerdown', (e) => { pressedOutside = outside(e); });
+  dialog.addEventListener('pointerup', (e) => { if (pressedOutside && outside(e)) dialog.close(); });
+}
+
 const slider = document.getElementById('yearSlider');
 
 export async function api(path, opts) {

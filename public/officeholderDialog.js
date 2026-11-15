@@ -1,11 +1,10 @@
 // The "Add officeholder" dialog: fills an office Wikidata records no holder for, by searching
 // Wikidata and Wikipedia for the person. Importing this module adds the dialog to the page.
-import { api, currentDateParam, dateForWikidata, officeholderImageEl, officeTitle } from './shared.js';
+import { api, currentDateParam, dateForWikidata, lightDismissFallback, officeholderImageEl, officeTitle } from './shared.js';
 import { createItemLine, openCreateItemDialog } from './createItemDialog.js';
 
 document.body.insertAdjacentHTML('beforeend', `
-  <div class="dialog-backdrop" id="holderDialogBackdrop">
-    <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-labelledby="holderDialogTitle">
+  <dialog class="dialog dialog-wide" id="holderDialog" closedby="any" aria-labelledby="holderDialogTitle">
       <h2 class="dialog-title" id="holderDialogTitle">Add officeholder</h2>
       <p class="dialog-intro" id="holderDialogIntro"></p>
       <div class="field">
@@ -37,11 +36,10 @@ document.body.insertAdjacentHTML('beforeend', `
         <button type="button" class="btn" id="holderDialogCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="holderDialogSave" disabled>Add officeholder</button>
       </div>
-    </div>
-  </div>
+  </dialog>
 `);
 
-const backdrop = document.getElementById('holderDialogBackdrop');
+const dialog = document.getElementById('holderDialog');
 const titleEl = document.getElementById('holderDialogTitle');
 const introEl = document.getElementById('holderDialogIntro');
 const searchInput = document.getElementById('holderSearch');
@@ -293,22 +291,20 @@ export function openAddOfficeholderDialog(entry, { onSave, start = '' } = {}) {
   setStatus(searchStatus, '');
   setStatus(statusEl, '');
   select(null);
-  backdrop.classList.add('open');
+  dialog.showModal();
   searchInput.focus();
 }
 
 function close() {
-  backdrop.classList.remove('open');
+  dialog.close();
   clearTimeout(searchTimeout);
   searchRequest++;
   currentEntry = null;
 }
 
 document.getElementById('holderDialogCancel').addEventListener('click', close);
-backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
-});
+dialog.addEventListener('close', () => dialog.open || close());
+lightDismissFallback(dialog);
 
 // After a save: close, or say why the page won't show them on the date being viewed.
 async function saved(startDate, endDate) {
