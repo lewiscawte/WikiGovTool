@@ -8,6 +8,7 @@ import {
   fetchPositionLifespans,
   PositionHistoryRow,
   resolveQidFromWikipediaTitle,
+  resolveRedirects,
 } from './wikidataClient';
 import { OfficeholderTerm, OrgChartEntry, OrgChartPosition, PositionBucket, PositionSeed } from '../types';
 
@@ -217,9 +218,25 @@ export function buildEntry(position: OrgChartPosition, history: PositionHistoryR
   };
 }
 
+// Offices whose item has been merged into another since it was stored or linked here: each takes
+// the item it now redirects to, and where that leaves two entries for one item, only the first
+// is kept (discovered offices come before added ones, so those win).
+export async function withRedirectsResolved(positions: OrgChartPosition[]): Promise<OrgChartPosition[]> {
+  const targets = await resolveRedirects(positions.map((p) => p.wikidataQid).filter((q): q is string => !!q));
+  const seen = new Set<string>();
+  const result: OrgChartPosition[] = [];
+  for (const position of positions) {
+    const qid = position.wikidataQid ? targets.get(position.wikidataQid) ?? position.wikidataQid : null;
+    if (qid && seen.has(qid)) continue;
+    if (qid) seen.add(qid);
+    result.push(qid === position.wikidataQid ? position : { ...position, wikidataQid: qid, ...(position.id === position.wikidataQid ? { id: qid! } : {}) });
+  }
+  return result;
+}
+
 // The country's cabinet-level offices: the curated seed list for the US, live discovery otherwise.
 export async function loadCabinetPositions(countryQid: string): Promise<OrgChartPosition[]> {
-  return countryQid === UNITED_STATES_QID ? loadStaticPositions() : loadDynamicPositions(countryQid);
+  return withRedirectsResolved(countryQid === UNITED_STATES_QID ? await loadStaticPositions() : await loadDynamicPositions(countryQid));
 }
 
 export async function buildOrgChart(date: Date, countryQid: string = UNITED_STATES_QID): Promise<OrgChartEntry[]> {

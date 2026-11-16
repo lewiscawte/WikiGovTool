@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { fetchPeople, fetchPersonDirect, PersonCandidate, searchEntities } from '../services/wikidataClient';
+import { fetchPeople, fetchPersonDirect, PersonCandidate, resolveRedirects, searchEntities } from '../services/wikidataClient';
 import { searchArticles } from '../services/wikipediaClient';
 import { addLocalOfficeholder } from '../store/officeholderStore';
 import { requireAuth } from '../middleware/requireAuth';
@@ -82,14 +82,19 @@ officeholdersRouter.post('/', requireAuth, async (req, res, next) => {
       res.status(400).json({ error: 'Left office is before took office' });
       return;
     }
+    // Kept under the items the office and person are now, if either was merged into another;
+    // the page looks fills up by the office's current item.
+    const redirects = await resolveRedirects([personQid, ...(QID_RE.test(positionKey) ? [positionKey] : [])]);
+    const officeKey = redirects.get(positionKey) ?? positionKey;
+    const personItem = redirects.get(personQid) ?? personQid;
     // An item created moments ago isn't in the query service yet, so read it directly.
-    const person = (await fetchPeople([personQid], null))[0] ?? await fetchPersonDirect(personQid);
+    const person = (await fetchPeople([personItem], null))[0] ?? await fetchPersonDirect(personItem);
     if (!person) {
-      res.status(400).json({ error: `${personQid} isn't a person on Wikidata` });
+      res.status(400).json({ error: `${personItem} isn't a person on Wikidata` });
       return;
     }
-    addLocalOfficeholder(positionKey, {
-      personQid,
+    addLocalOfficeholder(officeKey, {
+      personQid: personItem,
       personName: person.name,
       wikipediaTitle: person.wikipediaTitle,
       imageUrl: person.imageUrl,

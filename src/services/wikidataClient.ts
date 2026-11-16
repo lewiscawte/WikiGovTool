@@ -141,7 +141,7 @@ function buildHistoryQuery(qids: string[]): string {
   return `SELECT ?position ?person ?personLabel ?start ?end ?partyLabel ?image WHERE {
   VALUES ?position { ${qids.map((q) => `wd:${q}`).join(' ')} }
   ?person p:P39 ?statement .
-  ?statement ps:P39 ?position .
+  ${matching('?statement ps:P39', 'position')}
   OPTIONAL { ?statement pq:P580 ?start. }
   OPTIONAL { ?statement pq:P582 ?end. }
   OPTIONAL {
@@ -306,7 +306,7 @@ async function queryCabinetPositions(countryQid: string): Promise<CabinetPositio
 
   const bindings = await runSparql(`SELECT ?position ?positionLabel ?dept ?deptLabel WHERE {
   VALUES ?position { ${valuesList(selected.map((m) => m.qid))} }
-  OPTIONAL { ?position wdt:P2389 ?dept. }
+  OPTIONAL { ?position wdt:P2389 ?linked. ${canonical('linked', 'dept')} }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }`);
   const details = new Map<string, { label: string; department: string | null }>();
@@ -337,7 +337,8 @@ function buildDeputyPairsQuery(qids: string[]): string {
   // States" -P2098-> "Vice President of the United States").
   return `SELECT ?senior ?junior WHERE {
   VALUES ?senior { ${qids.map((q) => `wd:${q}`).join(' ')} }
-  ?senior wdt:P2098 ?junior .
+  ?senior wdt:P2098 ?linked .
+  ${canonical('linked', 'junior')}
 }`;
 }
 
@@ -370,6 +371,41 @@ async function runSparql(query: string): Promise<any[]> {
 
 const valuesList = (qids: string[]) => qids.map((q) => `wd:${q}`).join(' ');
 
+// Merged items: Wikidata turns the merged-away item into a redirect, which the query service
+// records as "old owl:sameAs new". Statements elsewhere keep pointing at the old item until a
+// bot updates them, so every item that comes back as a statement's value goes through this:
+// ?to is the item ?from redirects to, or ?from itself.
+const canonical = (from: string, to: string) => `OPTIONAL { ?${from} owl:sameAs ?${from}Target . } BIND(COALESCE(?${from}Target, ?${from}) AS ?${to})`;
+
+// Where the item is the one being asked about, a statement pointing at an item that redirects
+// to it counts too: "subject property item", or the same through a redirect. Spelled out as a
+// UNION because a property path through owl:sameAs is far slower, and times out across a
+// government. item is a variable name ("dept") or a constant ("wd:Q1").
+let aliasCount = 0;
+function matching(subjectAndProperty: string, item: string): string {
+  const target = item.startsWith('wd:') ? item : `?${item}`;
+  const alias = `?alias${++aliasCount}`;
+  return `{ { ${subjectAndProperty} ${target} . } UNION { ${alias} owl:sameAs ${target} . ${subjectAndProperty} ${alias} . } }`;
+}
+
+const redirectCache = structureCache<string>('redirect');
+
+// What each item now is: the item it redirects to, or itself. For items the tool stored
+// itself (added offices, departments, officeholders), which may have been merged since.
+export async function resolveRedirects(qids: string[]): Promise<Map<string, string>> {
+  const validQids = uniqueValidQids(qids);
+  if (validQids.length === 0) return new Map();
+  return redirectCache.getMany(validQids, async (missing) => {
+    const bindings = await runSparql(`SELECT ?item ?target WHERE {
+  VALUES ?item { ${valuesList(missing)} }
+  ?item owl:sameAs ?target .
+}`);
+    const result = new Map(missing.map((q) => [q, q]));
+    for (const b of bindings) result.set(toQid(b.item.value), toQid(b.target.value));
+    return result;
+  });
+}
+
 export interface DepartmentLink {
   positionQid: string;
   departmentQid: string;
@@ -387,7 +423,7 @@ export async function fetchDepartmentLinks(positionQids: string[]): Promise<Depa
   const departmentsByPosition = await departmentLinksCache.getMany(validQids, async (missing) => {
     const bindings = await runSparql(`SELECT DISTINCT ?position ?dept WHERE {
   VALUES ?position { ${valuesList(missing)} }
-  { ?position wdt:P2389 ?dept . } UNION { ?dept wdt:P2388 ?position . }
+  { ?position wdt:P2389 ?linked . ${canonical('linked', 'dept')} } UNION ${matching('?dept wdt:P2388', 'position')}
 }`);
     const departments = emptyListsFor<string>(missing);
     for (const b of bindings) departments.get(toQid(b.position.value))?.push(toQid(b.dept.value));
@@ -478,9 +514,10 @@ export async function fetchDepartmentOffices(departmentQids: string[]): Promise<
   const officesByDepartment = await departmentOfficesCache.getMany(validQids, async (missing) => {
     const bindings = await runSparql(`SELECT DISTINCT ?dept ?position ?positionLabel ?role WHERE {
   VALUES ?dept { ${valuesList(missing)} }
-  { ?position wdt:P2389 ?dept . BIND("head" AS ?role) }
-  UNION { ?dept wdt:P2388 ?position . BIND("head" AS ?role) }
-  UNION { ?position wdt:P361 ?dept . BIND("member" AS ?role) }
+  { ${matching('?position wdt:P2389', 'dept')} BIND("head" AS ?role) }
+  UNION { ?dept wdt:P2388 ?linked . ${canonical('linked', 'position')} BIND("head" AS ?role) }
+  UNION { ${matching('?position wdt:P361', 'dept')} BIND("member" AS ?role) }
+  # Not through redirects: with them, this filter times out across a whole government.
   FILTER EXISTS { ?holder wdt:P39 ?position . }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }`);
@@ -568,8 +605,9 @@ async function queryDepartmentProfile(qid: string): Promise<DepartmentProfile | 
 }`),
     runSparql(`SELECT ?prop ?value ?valueLabel WHERE {
   VALUES ?prop { ${Object.keys(PROFILE_LINKS).map((p) => `wdt:${p}`).join(' ')} }
-  wd:${qid} ?prop ?value .
-  FILTER(isIRI(?value) && STRSTARTS(STR(?value), "${ENTITY_URI_PREFIX}"))
+  wd:${qid} ?prop ?linked .
+  FILTER(isIRI(?linked) && STRSTARTS(STR(?linked), "${ENTITY_URI_PREFIX}"))
+  ${canonical('linked', 'value')}
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }`),
   ]);
@@ -654,7 +692,7 @@ export async function fetchPersonDirect(qid: string): Promise<PersonCandidate | 
 
 async function queryPeople(qids: string[], heldQid: string | null): Promise<Map<string, PersonCandidate>> {
   const heldBind = heldQid
-    ? `BIND(EXISTS { ?person wdt:P39 wd:${heldQid} . } AS ?held)`
+    ? `BIND(EXISTS ${matching('?person wdt:P39', `wd:${heldQid}`)} AS ?held)`
     : 'BIND(false AS ?held)';
   const bindings = await runSparql(`SELECT ?person (SAMPLE(?label) AS ?name) (SAMPLE(?desc) AS ?description)
        (MIN(?born) AS ?birth) (MAX(?died) AS ?death) (SAMPLE(?title) AS ?article) (SAMPLE(?img) AS ?image)
